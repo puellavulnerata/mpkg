@@ -35,4 +35,7 @@ typedef struct {
   pkg_descr_entry *entries;
 } pkg_descr;
 
+pkg_descr * read_pkg_descr_from_file( char *filename );
+void free_pkg_descr( pkg_descr * );
+
 #endif
