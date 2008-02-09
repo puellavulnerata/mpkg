@@ -23,9 +23,9 @@ static void free_pkg_descr_entry( pkg_descr_entry *p,
       if ( p->u.s.target )
 	free( p->u.s.target );
       break;
-      /* default: */
-      /* Do nothing for the default case */
-      /* TODO - Maybe print a warning about an unknown entry type? */
+    default:
+      fprintf( stderr, "Warning: free_pkg_descr_entry( %p, %d ) saw unknown entry type %d.\n",
+	       p, free_entry_struct, p->type );
     }
     if ( free_entry_struct ) free( p );
   }
