@@ -1,6 +1,8 @@
 #ifndef __PKG_H__
 #define __PKG_H__
 
+#define HASH_LEN 16
+
 typedef struct {
   char *pkg_name;
   time_t pkg_time;
@@ -18,7 +20,7 @@ typedef struct {
   union {
     struct {
       mode_t mode;
-      unsigned char hash[16];
+      unsigned char hash[HASH_LEN];
     } f;
     struct {
       mode_t mode;
@@ -35,7 +37,8 @@ typedef struct {
   pkg_descr_entry *entries;
 } pkg_descr;
 
-pkg_descr * read_pkg_descr_from_file( char *filename );
 void free_pkg_descr( pkg_descr * );
+pkg_descr * read_pkg_descr_from_file( char * );
+int write_pkg_descr_to_file( pkg_descr *, char * );
 
 #endif
