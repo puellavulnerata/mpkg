@@ -1,6 +1,9 @@
 #ifndef __PKGDESCR_H__
 #define __PKGDESCR_H__
 
+#include <sys/types.h>
+#include <time.h>
+
 #define HASH_LEN 16
 
 typedef struct {
@@ -33,7 +36,7 @@ typedef struct {
 
 typedef struct {
   pkg_descr_hdr hdr;
-  int num_entries;
+  int num_entries, num_entries_alloced;
   pkg_descr_entry *entries;
 } pkg_descr;
 

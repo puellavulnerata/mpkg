@@ -4,6 +4,22 @@
 
 static char hex_digit_to_char( unsigned char );
 
+char * copy_string( char *s ) {
+  int len;
+  char *t;
+
+  if ( s ) {
+    len = strlen( s );
+    t = malloc( sizeof( *s ) * ( len + 1 ) );
+    if ( t ) {
+      strncpy( t, s, len );
+      return t;
+    }
+    else return NULL;
+  }
+  else return NULL;
+}
+
 char * hash_to_string( unsigned char *hash, unsigned long len ) {
   char *str_temp;
   unsigned long i;
@@ -76,4 +92,223 @@ static char hex_digit_to_char( unsigned char x ) {
   default:
     return -1;
   }
+}
+
+int is_whitespace( char *str ) {
+  char c;
+
+  if ( str ) {
+    while ( c = *str++ ) {
+      if ( !isspace( c ) ) return 0;
+    }
+    return 1;
+  }
+  else return -1;
+}
+
+#define INITIAL_STRINGS_ALLOC 4
+
+int parse_strings_from_line( char *line, char ***strings_out ) {
+  /*
+   * Parse out all non-whitespace substrings of at least one char;
+   * return write to strings_out a block of pointers to them, and
+   * write a NUL afer each.  Terminate strings_out will a NULL
+   * pointer.
+   */
+  int strings_seen, strings_alloced, new_alloced, last_one;
+  char **strings, **temp;
+  char *curr_string;
+
+  if ( line && strings_out ) {
+    strings_seen = strings_alloced = 0;
+    strings = NULL;
+    curr_string = NULL;
+    last_one = 0;
+    do {
+      /* Check if this is the last char before we write any NULs out */
+      if ( *line == '\0' ) last_one = 1;
+      if ( curr_string ) {
+	/*
+	 * We're currently in a non-WS string
+	 */
+	if ( isspace( *line ) || *line == '\0' ) {
+	  /*
+	   * It just ended on this char, so we need to terminate it
+	   * with a NUL and add it to our list.
+	   */
+
+	  /* Write out the NUL */
+	  *line = '\0';
+	  /* Expand strings as necessary */
+	  while ( !( strings_alloced > 0 &&
+		     strings_seen < strings_alloced ) ) {
+	    if ( strings_alloced > 0 ) {
+	      new_alloced = 2 * strings_alloced;
+	      temp = realloc( strings, sizeof( *strings ) * new_alloced );
+	      if ( !temp ) {
+		if ( strings ) free( strings );
+		fprintf( stderr, "Error allocating memory in parse_strings_from_line()\n" );
+		return -1;
+	      }
+	      strings = temp;
+	      strings_alloced = new_alloced;
+	    }
+	    else {
+	      new_alloced = INITIAL_STRINGS_ALLOC;
+	      temp = malloc( sizeof( *strings ) * new_alloced );
+	      if ( !temp ) {
+		if ( strings ) free( strings );
+		fprintf( stderr, "Error allocating memory in parse_strings_from_line()\n" );
+		return -1;
+	      }
+	      strings = temp;
+	      strings_alloced = new_alloced;
+	    }
+	  }
+	  /* We know we have a big enough buffer now */
+	  /* Add this string to the buffer */
+	  strings[strings_seen++] = curr_string;
+	  /* And we're not in a non-WS string any more */
+	  curr_string = NULL;
+	}
+	/*
+	 * Else it wasn't a whitespace, so it was just another one in
+	 * the current string.  Keep scanning ahead.
+	 */
+      }
+      else {
+	/* We're not in a non-WS string */
+	if ( !( isspace( *line ) || *line == '\0' ) ) {
+	  /* It's not whitespace, start a new string */
+	  curr_string = line;
+	}
+	/* else it's just more whitespace, keep scanning ahead */
+      }
+      /* Done processing this char */
+    } while ( !last_one );
+    /* Resize the buffer to strings_seen + 1 */
+    new_alloced = strings_seen + 1;
+    if ( strings_alloced > 0 ) {
+      temp = realloc( strings, sizeof( *strings ) * new_alloced );
+      if ( !temp ) {
+	if ( strings ) free( strings );
+	fprintf( stderr,
+		 "Error allocating memory in parse_strings_from_line()\n" );
+	return -1;
+      }
+    }
+    else {
+      temp = malloc( sizeof( *strings ) * new_alloced );
+      if ( !temp ) {
+	if ( strings ) free( strings );
+	fprintf( stderr,
+		 "Error allocating memory in parse_strings_from_line()\n" );
+	return -1;
+      }
+    }
+    strings = temp;
+    strings_alloced = new_alloced;
+    /* NULL-terminate it */
+    strings[strings_seen] = NULL;
+    /* Output it and return */
+    *strings_out = strings;
+    return 0;
+  }
+  else return -1;
+}
+
+#define INITIAL_LINE_ALLOC 16
+
+char * read_line_from_file( FILE *fp ) {
+  char *line, *temp;
+  int num_chars, num_alloced, new_alloced;
+  int c, eof;
+  char ch;
+
+  if ( fp ) {
+    line = NULL;
+    num_chars = num_alloced = 0;
+    eof = 1;
+    do {
+      c = fgetc( fp );
+      /* EOF, newline or NULL terminate a line */
+      if ( !( c == EOF || c == '\n' || c == 0 ) ) ch = (char)c;
+      else ch = 0;
+      if ( ch != 0 ) {
+	while ( !( num_alloced > 0 && num_chars < num_alloced ) ) {
+	  /*
+	   * We don't have enough allocated, reallocate as needed
+	   */
+	  if ( num_alloced > 0 ) {
+	    /*
+	     * We've already allocate some chars, resize it bigger
+	     */
+	    new_alloced = 2 * num_alloced;
+	    temp = realloc( line, sizeof( *line ) * new_alloced );
+	    if ( !temp ) {
+	      fprintf( stderr,
+		       "Error allocating memory in read_line_from_file()\n" );
+	      free( line );
+	      return NULL;
+	    }
+	    line = temp;
+	    num_alloced = new_alloced;
+	  }
+	  else {
+	    /*
+	     * This is the first allocation
+	     */
+	    new_alloced = INITIAL_LINE_ALLOC;
+	    temp = malloc( sizeof( *line ) * new_alloced );
+	    if ( !temp ) {
+	      fprintf( stderr,
+		       "Error allocating memory in read_line_from_file()\n" );
+	      return NULL;
+	    }
+	    line = temp;
+	    num_alloced = new_alloced;
+	  }
+	}
+	line[num_chars++] = ch;
+      }
+      else if ( c == EOF ) eof = 1;
+    } while ( ch != 0 );
+    if ( eof == 0 || num_chars > 0 ) {
+      /*
+       * Resize to fit the number of chars we actually got
+       */
+      temp = realloc( line, sizeof( *line ) * ( num_chars + 1 ) );
+      if ( temp ) {
+	line = temp;
+	line[num_chars] = '\0';
+      }
+      else {
+	fprintf( stderr,
+		 "Error allocating memory in read_line_from_file()\n" );
+	if ( line ) free( line );
+	line = NULL;
+      }
+    }
+    else {
+      /*
+       * We saw an EOF as the first char, return NULL because there's nothing
+       * there.
+       */
+      if ( line ) free( line );
+      line = NULL;
+    }
+    return line;
+  }
+  else return NULL;
+}
+
+int strlistlen( char **list ) {
+  int len;
+
+  if ( list ) {
+    len = 0;
+    while ( *list++ ) ++len;
+    return len;
+  }
+  else return -1;
 }
