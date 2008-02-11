@@ -7,7 +7,8 @@
 #include <pkg.h>
 
 pkg_db * open_pkg_db_bdb( char *filename ) {
-  pkg_db *ret = malloc(sizeof struct pkg_db);
+  pkg_db *ret = malloc( sizeof ( pkg_db ) );
+  DB *bdb;
 
   if( ret == NULL ) 
     perror( "" );
@@ -17,27 +18,36 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
   ret->delete = delete_from_bdb;
   ret->close = close_bdb;
 
-  if( db_create( db->private, NULL, 0 ) != 0 )
+  if( db_create( ret->private, NULL, 0 ) != 0 )
   {
     // Might want to use DB->err, but it's simpler to fprintf.
     fprintf( stderr, "bdb database create failed\n" );
     free( ret );
     return NULL;
   }
+  bdb = ret->private;
 
-  return db->open( db->private, NULL, filename, NULL, DB_BTREE, DB_CREATE, 0 );
+  if( bdb->open( ret->private, NULL, filename, 
+    NULL, DB_BTREE, DB_CREATE, 0 ) != 0)
+  {
+    fprintf( stderr, "bdb database open failed\n" );
+    free( ret );
+    return NULL;
+  }
+
+  return ret;
 }
 
-int close_bdb( pkg_db *db ) {
+int close_bdb( void *db ) {
   int ret;
-  DB *bdb = db->private;
+  DB *bdb = ((pkg_db *) db)->private;
   ret = bdb->close( bdb, 0 ); // frees db->private too
   free( db );
   return ret;
 }
 
-int delete_from_bdb( pkg_db *db, char *key ) {
-  DB *bdb = db->private;
+int delete_from_bdb( void *db, char *key ) {
+  DB *bdb = ((pkg_db *) db)->private;
   DBT bdb_key;
   
   bdb_key.data = key;
@@ -46,8 +56,8 @@ int delete_from_bdb( pkg_db *db, char *key ) {
   return bdb->del( bdb, NULL, &bdb_key, 0 );
 }
 
-char * query_bdb( pkg_db *db, char *key ) {
-  DB *bdb = db->private;
+char * query_bdb( void *db, char *key ) {
+  DB *bdb = ((pkg_db *) db)->private;
   DBT bdb_key, bdb_value;
   char *ret;
 
@@ -56,14 +66,14 @@ char * query_bdb( pkg_db *db, char *key ) {
 
   bdb->get( bdb, NULL, &bdb_key, &bdb_value, 0 );
 
-  ret = malloc( SIZEOF_STR(bdb_value.data) );
-  strcpy( ret, bdb_data.data );
+  ret = malloc( ( bdb_value.size + 1 ) * sizeof( char ) );
+  strcpy( ret, bdb_value.data );
   
   return ret;
 } 
 
-int insert_into_bdb( pkg_db *db, char *key, char *value ) {
-  DB *bdb = db->private;
+int insert_into_bdb( void *db, char *key, char *value ) {
+  DB *bdb = ((pkg_db *) db)->private;
   DBT bdb_key, bdb_value;
   
   bdb_key.data = key; 
@@ -72,5 +82,5 @@ int insert_into_bdb( pkg_db *db, char *key, char *value ) {
   bdb_value.data = value;
   bdb_value.size = SIZEOF_STR( value );
 
-  return bdb->put( bdb, NULL, &key, &value, 0 );
+  return bdb->put( bdb, NULL, &bdb_key, &bdb_value, 0 );
 }
