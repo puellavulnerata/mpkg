@@ -77,6 +77,8 @@ static text_file_data * read_text_file( char *filename ) {
 	if ( tfd->filename ) {
 	  tfd->data = rbtree_alloc( rbtree_string_comparator,
 				    rbtree_string_copier,
+				    rbtree_string_free,
+				    rbtree_string_copier,
 				    rbtree_string_free );
 	  if ( tfd->data ) {
 	    result = parse_text_file( fp, tfd->data );
