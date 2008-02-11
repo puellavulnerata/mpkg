@@ -22,7 +22,7 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
     return NULL;
   }
 
-  return db->open( db, NULL, filename, NULL, DB_BTREE, DB_CREATE, 0 );
+  return db->open( db->private, NULL, filename, NULL, DB_BTREE, DB_CREATE, 0 );
 }
 
 int close_bdb( pkg_db *db ) {
