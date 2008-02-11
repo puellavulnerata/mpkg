@@ -1,7 +1,10 @@
 #include <stdlib.h>
-#include <pkg.h>
-#include <pkgdb_bdb.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <db.h>
+
+#include <pkg.h>
 
 pkg_db * open_pkg_db_bdb( char *filename ) {
   pkg_db *ret = malloc(sizeof struct pkg_db);
