@@ -245,7 +245,7 @@ static int parse_file_entry( pkg_descr_entry *e, char **fields ) {
 	      e->owner = owner;
 	      e->group = group;
 	      e->u.f.mode = (mode_t)mode;
-	      memcpy( &(e->u.f.hash), &hash, sizeof( hash ) );
+	      memcpy( &(e->u.f.hash), hash, sizeof( hash ) );
 	    }
 	    else {
 	      if ( filename ) free( filename );
@@ -297,9 +297,9 @@ static int parse_hash( char *s, unsigned char *hash_out ) {
   status = 0;
   if ( s && hash_out ) {
     if ( strlen( s ) == 2 * HASH_LEN ) {
-      temp[2] = '\0';
+      temp[1] = '\0';
       for ( i = 0; i < HASH_LEN; ++i ) {
-	temp[1] = s[2*i];
+	temp[0] = s[2*i];
 	result = sscanf( temp, "%x", &digit_h );
 	if ( result != 1 ) {
 	  status = -1;
@@ -309,7 +309,7 @@ static int parse_hash( char *s, unsigned char *hash_out ) {
 	  status = -1;
 	  break;
 	}
-	temp[1] = s[2*i+1];
+	temp[0] = s[2*i+1];
 	result = sscanf( temp, "%x", &digit_l );
 	if ( result != 1 ) {
 	  status = -1;
@@ -323,6 +323,9 @@ static int parse_hash( char *s, unsigned char *hash_out ) {
 	hash_temp[i] = (unsigned char)hash_byte;
       }
       if ( status == 0 ) memcpy( hash_out, hash_temp, sizeof( hash_temp ) );
+    }
+    else {
+      status = -1;
     }
   }
   else status = -1;

@@ -14,7 +14,7 @@ char * copy_string( char *s ) {
     len = strlen( s );
     t = malloc( sizeof( *s ) * ( len + 1 ) );
     if ( t ) {
-      strncpy( t, s, len );
+      strncpy( t, s, len + 1 );
       return t;
     }
     else return NULL;
@@ -128,7 +128,9 @@ int parse_strings_from_line( char *line, char ***strings_out ) {
     last_one = 0;
     do {
       /* Check if this is the last char before we write any NULs out */
-      if ( *line == '\0' ) last_one = 1;
+      if ( *line == '\0' ) {
+	last_one = 1;
+      }
       if ( curr_string ) {
 	/*
 	 * We're currently in a non-WS string
@@ -187,6 +189,7 @@ int parse_strings_from_line( char *line, char ***strings_out ) {
 	/* else it's just more whitespace, keep scanning ahead */
       }
       /* Done processing this char */
+      ++line;
     } while ( !last_one );
     /* Resize the buffer to strings_seen + 1 */
     new_alloced = strings_seen + 1;
