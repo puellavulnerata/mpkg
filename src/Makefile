@@ -3,7 +3,7 @@ include ../config.mk
 INCLUDE_FLAGS=-I../include
 LIBS=
 
-OBJS=pkg.o pkgdescr.o pkgutil.o
+OBJS=pkg.o pkgdb.o pkgdescr.o pkgutil.o
 
 .PHONY: all clean
 
