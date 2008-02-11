@@ -14,4 +14,10 @@ int delete_from_pkg_db( pkg_db *, char * );
 int insert_into_pkg_db( pkg_db *, char *, char * );
 char * query_pkg_db( pkg_db *, char * );
 
+/*
+ * Format-specific constructors
+ */ 
+
+pkg_db * open_pkg_db_text_file( char * );
+
 #endif
