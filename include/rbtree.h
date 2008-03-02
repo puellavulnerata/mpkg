@@ -31,6 +31,7 @@ rbtree * rbtree_alloc( int (*)( void *, void * ), /* comparator */
 		       void (*)( void * ) /* free_val */
 		       );
 int rbtree_delete( rbtree *, void * );
+void rbtree_dump( rbtree *, void (*)( void * ), void (*)( void * ) );
 void * rbtree_enum( rbtree *, rbtree_node *, void **, rbtree_node ** );
 void rbtree_free( rbtree * );
 int rbtree_insert( rbtree *, void *, void * );
@@ -39,5 +40,7 @@ unsigned long rbtree_size( rbtree * );
 int rbtree_string_comparator( void *, void * );
 void * rbtree_string_copier( void * );
 void rbtree_string_free( void * );
+void rbtree_string_printer( void * );
+int rbtree_validate( rbtree * );
 
 #endif
