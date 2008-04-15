@@ -116,6 +116,7 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
       fprintf( stderr,
 	       "rbtree_delete_and_fixup( %p ): case 1, n is the root\n", n );
 #endif
+
       if ( t->root == n ) {
 	if ( child ) {
 	  child->up = NULL;
@@ -137,11 +138,13 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 
       if ( status == RBTREE_SUCCESS ) {
 	if ( n->color == RED ) {
+
 #ifdef RBTREE_DEBUG
 	  fprintf( stderr,
 		   "rbtree_delete_and_fixup( %p ): ", n );
 	  fprintf( stderr, "case 2, n is not the root and is red\n" );
 #endif
+
 	  /* Case 2: n is red */
 	  if ( child ) {
 	    *parent_ptr = child;
@@ -152,12 +155,14 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 	}
 	else if ( n->color == BLACK ) {
 	  if ( child && child->color == RED ) {
+
 #ifdef RBTREE_DEBUG
 	    fprintf( stderr,
 		     "rbtree_delete_and_fixup( %p ): ", n );
 	    fprintf( stderr, "case 3, n is not the root and is black " );
 	    fprintf( stderr, "and has a red child\n" );
 #endif
+
 	    /* Case 3: n is black, and its child exists and is red */
 	    *parent_ptr = child;
 	    child->up = parent;
@@ -165,6 +170,7 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 	    free( n );
 	  }
 	  else {
+
 #ifdef RBTREE_DEBUG
 	    fprintf( stderr,
 		     "rbtree_delete_and_fixup( %p ): ", n );
@@ -183,6 +189,7 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 	      child->color = BLACK;
 	    }
 	    free( n );
+
 #ifdef RBTREE_DEBUG
 	    fprintf( stderr, "deleted n and put its child in its place," );
 	    fprintf( stderr, " about to call rbtree_delete_rebalance()\n" );
@@ -190,6 +197,7 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 			 rbtree_string_printer,
 			 rbtree_string_printer );
 #endif
+
 	    status = rbtree_delete_rebalance( t, parent, child );
 	  }
 	}
@@ -421,6 +429,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 	/* Case 1: s is red */
 
 	if ( s->color == RED ) {
+
 #ifdef RBTREE_DEBUG
 	  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
 	  fprintf( stderr, "case 1; s is red\n" );
@@ -445,6 +454,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 		       rbtree_string_printer,
 		       rbtree_string_printer );
 #endif
+
 	}
 
 	/* We fall through to the next case */
@@ -467,6 +477,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 #endif
 
 	      s->color = RED;
+
 #ifdef RBTREE_DEBUG
 	      rbtree_dump( t,
 			   rbtree_string_printer,
@@ -474,21 +485,26 @@ static int rbtree_delete_rebalance( rbtree *t,
 #endif
 
 	      if ( p->up ) {
+
 #ifdef RBTREE_DEBUG
 		fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
 		fprintf( stderr, "case 2 about to recurse\n" );
 #endif
+
 		status = rbtree_delete_rebalance( t, p->up, p );
 	      }
+
 #ifdef RBTREE_DEBUG
 	      else {
 		fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
 		fprintf( stderr, "case 2 at the root, we're done\n" );
 	      }
 #endif
+
 	    }
 	    else if ( p->color == RED ) {
 	      /* Case 3; we make p black and s red and we're done */
+
 #ifdef RBTREE_DEBUG
 	      fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
 	      fprintf( stderr, "case 3, p red, n and s black," ); 
@@ -497,11 +513,13 @@ static int rbtree_delete_rebalance( rbtree *t,
 	      
 	      p->color = BLACK;
 	      s->color = RED;
+
 #ifdef RBTREE_DEBUG
 	      rbtree_dump( t,
 			   rbtree_string_printer,
 			   rbtree_string_printer );
 #endif
+
 	    }
 	    else status = RBTREE_ERROR;
 	  }
@@ -530,7 +548,9 @@ static int rbtree_delete_rebalance( rbtree *t,
 			   "About to call rbtree_rotate_right( %p, %p )\n",
 			   t, s );
 #endif
+
 		  rbtree_rotate_right( t, s );
+
 #ifdef RBTREE_DEBUG
 		  fprintf( stderr,
 			   "rbtree_rotate_right( %p, %p ) done\n",
@@ -541,6 +561,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 		   * The old left child of s is the new sister of n,
 		   * and ended up the parent of s after the rotation.
 		   */
+
 		  s = s->up;
 
 #ifdef RBTREE_DEBUG
@@ -548,6 +569,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 			       rbtree_string_printer,
 			       rbtree_string_printer );
 #endif
+
 		}
 
 		/*
@@ -576,6 +598,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 			       rbtree_string_printer,
 			       rbtree_string_printer );
 #endif
+
 		}
 		else status = RBTREE_ERROR;
 	      }
@@ -609,6 +632,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 			       rbtree_string_printer,
 			       rbtree_string_printer );
 #endif
+
 		}
 
 		/*
@@ -619,6 +643,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 
 		if ( s->left && s->left->color == RED ) {
 		  /* This is case 7 as described above. */
+
 #ifdef RBTREE_DEBUG
 		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
 			   p, n );
@@ -636,6 +661,7 @@ static int rbtree_delete_rebalance( rbtree *t,
 			       rbtree_string_printer,
 			       rbtree_string_printer );
 #endif
+
 		}
 		else status = RBTREE_ERROR;
 	      }
