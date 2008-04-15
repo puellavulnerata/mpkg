@@ -112,6 +112,10 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
     if ( n->up == NULL ) {
       /* Case 1: n is the root */
 
+#ifdef RBTREE_DEBUG
+      fprintf( stderr,
+	       "rbtree_delete_and_fixup( %p ): case 1, n is the root\n", n );
+#endif
       if ( t->root == n ) {
 	if ( child ) {
 	  child->up = NULL;
@@ -133,16 +137,27 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 
       if ( status == RBTREE_SUCCESS ) {
 	if ( n->color == RED ) {
+#ifdef RBTREE_DEBUG
+	  fprintf( stderr,
+		   "rbtree_delete_and_fixup( %p ): ", n );
+	  fprintf( stderr, "case 2, n is not the root and is red\n" );
+#endif
 	  /* Case 2: n is red */
 	  if ( child ) {
 	    *parent_ptr = child;
 	    child->up = parent;
 	  }
-	  else parent_ptr = NULL;
+	  else *parent_ptr = NULL;
 	  free( n );
 	}
 	else if ( n->color == BLACK ) {
 	  if ( child && child->color == RED ) {
+#ifdef RBTREE_DEBUG
+	    fprintf( stderr,
+		     "rbtree_delete_and_fixup( %p ): ", n );
+	    fprintf( stderr, "case 3, n is not the root and is black " );
+	    fprintf( stderr, "and has a red child\n" );
+#endif
 	    /* Case 3: n is black, and its child exists and is red */
 	    *parent_ptr = child;
 	    child->up = parent;
@@ -150,12 +165,31 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 	    free( n );
 	  }
 	  else {
+#ifdef RBTREE_DEBUG
+	    fprintf( stderr,
+		     "rbtree_delete_and_fixup( %p ): ", n );
+	    fprintf( stderr, "n is not the root and is black " );
+	    fprintf( stderr, "and has a black child, we call " );
+	    fprintf( stderr, "rbtree_delete_rebalance()\n" );
+	    rbtree_dump( t,
+			 rbtree_string_printer,
+			 rbtree_string_printer );
+	    
+#endif
+	    
 	    *parent_ptr = child;
 	    if ( child ) {
 	      child->up = parent;
 	      child->color = BLACK;
 	    }
 	    free( n );
+#ifdef RBTREE_DEBUG
+	    fprintf( stderr, "deleted n and put its child in its place," );
+	    fprintf( stderr, " about to call rbtree_delete_rebalance()\n" );
+	    rbtree_dump( t,
+			 rbtree_string_printer,
+			 rbtree_string_printer );
+#endif
 	    status = rbtree_delete_rebalance( t, parent, child );
 	  }
 	}
@@ -297,13 +331,13 @@ static int rbtree_delete_rebalance( rbtree *t,
    * or sr.  We have reduced to the case where n and s are black and p
    * is red.
    *
-   * Case 2: s is black and p is black.  We make s red, so all paths
-   * passing through s have one less black node.  Since a black node
-   * was deleted between p and n, those paths also were one black node
-   * short.  Thus, paths passing through p now all have the same
-   * number of black nodes again, but unless p is the root node they
-   * might be unbalanced against the rest of the tree.  Recurse on p
-   * and its parent.
+   * Case 2: s is black, p is black and the children of s are black or
+   * do not exist.  We make s red, so all paths passing through s have
+   * one less black node.  Since a black node was deleted between p
+   * and n, those paths also were one black node short.  Thus, paths
+   * passing through p now all have the same number of black nodes
+   * again, but unless p is the root node they might be unbalanced
+   * against the rest of the tree.  Recurse on p and its parent.
    *
    * Case 3: s is black, p is red and both of the children of s either
    * do not exist or are black.  If we make p black and s red, we have
@@ -311,40 +345,39 @@ static int rbtree_delete_rebalance( rbtree *t,
    * have increased by one the number of black nodes on paths through
    * n, compensating for the original deletion.
    *
-   * Case 4: p is red, n and s are black.  n is the left child of p,
-   * and s is the right child of p.  The left child of s exists and is
-   * red, and the right child of s does not exist or is black.  We
-   * rotate right at s, so that the red left child of s becomes n's
-   * new sibling and the black s becomes its new left child.  We make
-   * the new sibling black and the old one red, and then we relabel
-   * the former left child of s to s and fall through to case 6.
-   * Paths that passed through the left child of s now either pass
-   * through it in its new position, or through it then s, but not
-   * through the right child of s, if any, and thus have the same
-   * number of black nodes as before.  Paths that passed through the
-   * right child of s, if any, now pass through the former left child,
-   * then s, then the right child, and thus have the same number of
-   * black nodes as before.
+   * Case 4: n and s are black.  n is the left child of p, and s is
+   * the right child of p.  The left child of s exists and is red, and
+   * the right child of s does not exist or is black.  We rotate right
+   * at s, so that the red left child of s becomes n's new sibling and
+   * the black s becomes its new left child.  We make the new sibling
+   * black and the old one red, and then we relabel the former left
+   * child of s to s and fall through to case 6.  Paths that passed
+   * through the left child of s now either pass through it in its new
+   * position, or through it then s, but not through the right child
+   * of s, if any, and thus have the same number of black nodes as
+   * before.  Paths that passed through the right child of s, if any,
+   * now pass through the former left child, then s, then the right
+   * child, and thus have the same number of black nodes as before.
    *
-   * Case 5: p is red, n and s are black.  s is the left child of p,
-   * and n is the right child of p.  The right child of s exists and
-   * is red, and the left child of s does not exist or is black.  We
-   * rotate left at s, so that the red right child of s becomes n's
-   * new sibling and the black s becomes its new right child.  We make
-   * the new sibling black and the old one red, and then we relabel
-   * the former right child of s to s and fall through to case 7.
-   * Paths that passed through the right child of s now either pass
-   * through it in its new position, or through it then s, but not
-   * through the left child of s, if any, and thus have the same
-   * number of black nodes as before.  Paths that passed through the
-   * left child of s, if any, now pass through the former right child,
-   * then s, then the left child, and thus have the same number of
-   * black nodes as before.
+   * Case 5: n and s are black.  s is the left child of p, and n is
+   * the right child of p.  The right child of s exists and is red,
+   * and the left child of s does not exist or is black.  We rotate
+   * left at s, so that the red right child of s becomes n's new
+   * sibling and the black s becomes its new right child.  We make the
+   * new sibling black and the old one red, and then we relabel the
+   * former right child of s to s and fall through to case 7.  Paths
+   * that passed through the right child of s now either pass through
+   * it in its new position, or through it then s, but not through the
+   * left child of s, if any, and thus have the same number of black
+   * nodes as before.  Paths that passed through the left child of s,
+   * if any, now pass through the former right child, then s, then the
+   * left child, and thus have the same number of black nodes as
+   * before.
    * 
-   * Case 6: p is red, n and s are black.  n is the left child of p,
-   * and s is the right child of p.  The right child of s exists and
-   * is red.  We rotate left at p, so now s is the parent of p and its
-   * former right child.  We make s red and p black, and make the red
+   * Case 6: n and s are black.  n is the left child of p, and s is
+   * the right child of p.  The right child of s exists and is red.
+   * We rotate left at p, so now s is the parent of p and its former
+   * right child.  We switch the colors of s and p, and make the red
    * right child of s black.  The subtree still has a red node at its
    * root, and now an additional black node sits between it and n,
    * compensating for the one lost in deletion.  The paths not passing
@@ -355,10 +388,10 @@ static int rbtree_delete_rebalance( rbtree *t,
    * red p, black s and the red right child of s, and hence have the
    * same number of black nodes.
    *
-   * Case 7: p is red, n and s are black.  n is the right child of p,
-   * and s is the left child of p.  The left child of s exists and is
-   * red.  We rotate right at p, so now s is the parent of p and its
-   * former left child.  We make s red and p black, and make the red
+   * Case 7: n and s are black.  n is the right child of p, and s is
+   * the left child of p.  The left child of s exists and is red.  We
+   * rotate right at p, so now s is the parent of p and its former
+   * left child.  We switch the colors of s and p, and make the red
    * left child of s black.  The subtree still has a red node at its
    * root, and now an additional black node sits between it and n,
    * compensating for the one lost in deletion.  The paths not passing
@@ -386,115 +419,229 @@ static int rbtree_delete_rebalance( rbtree *t,
 
       if ( s && status == RBTREE_SUCCESS ) {
 	/* Case 1: s is red */
+
 	if ( s->color == RED ) {
+#ifdef RBTREE_DEBUG
+	  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
+	  fprintf( stderr, "case 1; s is red\n" );
+#endif
+
 	  if ( p->left == n ) {
 	    rbtree_rotate_left( t, p );
 	    p->color = RED;
 	    s->color = BLACK;
-	    s = s->left;
+	    s = p->right;
 	  }
 	  else if ( p->right == n ) {
 	    rbtree_rotate_right( t, p );
 	    p->color = RED;
 	    s->color = BLACK;
-	    s = s->right;
+	    s = p->left;
 	  }
 	  else status = RBTREE_ERROR;
+
+#ifdef RBTREE_DEBUG
+	  rbtree_dump( t,
+		       rbtree_string_printer,
+		       rbtree_string_printer );
+#endif
 	}
 
 	/* We fall through to the next case */
 
 	if ( s && s->color == BLACK ) {
-	  if ( p->color == BLACK ) {
-	    /*
-	     * p, n and s are all black.  This is case 2 above.  We
-	     * make s red, and if p is the root, we're done.
-	     * Otherwise, recurse.
-	     */
+	  if ( ( !(s->left)  || s->left->color == BLACK ) &&
+	       ( !(s->right) || s->right->color == BLACK ) ) {
+	    if ( p->color == BLACK ) {
+	      /*
+	       * p, n and s are all black, and the children of s are
+	       * black of do not exist.  This is case 2 above.  We
+	       * make s red, and if p is the root, we're done.
+	       * Otherwise, recurse.
+	       */
 
-	    s->color = RED;
-	    if ( p->up ) status = rbtree_delete_rebalance( t, p->up, p );
+#ifdef RBTREE_DEBUG
+	      fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
+	      fprintf( stderr, "case 2; p, n and s (%p) are all black\n",
+		       s );
+#endif
+
+	      s->color = RED;
+#ifdef RBTREE_DEBUG
+	      rbtree_dump( t,
+			   rbtree_string_printer,
+			   rbtree_string_printer );
+#endif
+
+	      if ( p->up ) {
+#ifdef RBTREE_DEBUG
+		fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
+		fprintf( stderr, "case 2 about to recurse\n" );
+#endif
+		status = rbtree_delete_rebalance( t, p->up, p );
+	      }
+#ifdef RBTREE_DEBUG
+	      else {
+		fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
+		fprintf( stderr, "case 2 at the root, we're done\n" );
+	      }
+#endif
+	    }
+	    else if ( p->color == RED ) {
+	      /* Case 3; we make p black and s red and we're done */
+#ifdef RBTREE_DEBUG
+	      fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
+	      fprintf( stderr, "case 3, p red, n and s black," ); 
+	      fprintf( stderr, " both children of s black\n" );
+#endif
+	      
+	      p->color = BLACK;
+	      s->color = RED;
+#ifdef RBTREE_DEBUG
+	      rbtree_dump( t,
+			   rbtree_string_printer,
+			   rbtree_string_printer );
+#endif
+	    }
+	    else status = RBTREE_ERROR;
 	  }
 	  else {
 	    /*
-	     * p is red, n and s are both black.
+	     * n and s are both black, and s has at least one red child
 	     */
+	    
+	    if ( p->left == n ) {
+	      if ( p->right == s ) {
+		if ( ( s->left && s->left->color == RED ) &&
+		     ( !(s->right) || s->right->color == BLACK ) ) {
+		  /* This is case 4 as described above. */
 
-	    if ( ( !(s->left) || s->left->color == BLACK ) &&
-		 ( !(s->right) || s->right->color == BLACK ) ) {
-	      /* Case 3; we make p black and s red and we're done */
+#ifdef RBTREE_DEBUG
+		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
+			   p, n );
+		  fprintf( stderr, "case 4 (s is %p)\n", s );
+#endif
 
-	      p->color = BLACK;
-	      s->color = RED;
-	    }
-	    else {
-	      /*
-	       * p is red, n and s are both black, at least one child
-	       * of s exists and is red.
-	       */
+		  s->left->color = BLACK;
+		  s->color = RED;
 
-	      if ( p->left == n ) {
-		if ( p->right == s ) {
-		  if ( ( s->left && s->left->color == RED ) &&
-		       ( !(s->right) || s->right->color == BLACK ) ) {
-		    /* This is case 4 as described above. */
-
-		    rbtree_rotate_right( t, s );
-		    s->left->color = BLACK;
-		    s->color = RED;
-		    s = s->left;
-		  }
+#ifdef RBTREE_DEBUG
+		  fprintf( stderr,
+			   "About to call rbtree_rotate_right( %p, %p )\n",
+			   t, s );
+#endif
+		  rbtree_rotate_right( t, s );
+#ifdef RBTREE_DEBUG
+		  fprintf( stderr,
+			   "rbtree_rotate_right( %p, %p ) done\n",
+			   t, s );
+#endif
 
 		  /*
-		   * This must be true, since at least one of them is
-		   * red or we would have hit case 3, and if it was
-		   * the left one we just moved it above.
+		   * The old left child of s is the new sister of n,
+		   * and ended up the parent of s after the rotation.
 		   */
+		  s = s->up;
 
-		  if ( s->right && s->right->color == RED ) {
-		    /* This is case 6 as described above. */
-
-		    rbtree_rotate_left( t, p );
-		    s->color = RED;
-		    p->color = BLACK;
-		    s->right->color = BLACK;
-		  }
-		  else status = RBTREE_ERROR;
+#ifdef RBTREE_DEBUG
+		  rbtree_dump( t,
+			       rbtree_string_printer,
+			       rbtree_string_printer );
+#endif
 		}
-		else status = RBTREE_ERROR;
-	      }
-	      else if ( p->right == n ) {
-		if ( p->left == s ) {
-		  if ( ( s->right && s->right->color == RED ) &&
-		       ( !(s->left) || s->left->color == BLACK ) ) {
-		    /* This is case 5 as described above. */
 
-		    rbtree_rotate_left( t, s );
-		    s->right->color = BLACK;
-		    s->color = RED;
-		    s = s->right;
-		  }
+		/*
+		 * This must be true, since at least one of them is
+		 * red or we would have hit case 3, and if it was
+		 * the left one we just moved it above.
+		 */
 
-		  /*
-		   * This must be true, since at least one of them is
-		   * red or we would have hit case 3, and if it was
-		   * the right one we just moved it above.
-		   */
+		if ( s->right && s->right->color == RED ) {
+		  /* This is case 6 as described above. */
 
-		  if ( s->left && s->left->color == RED ) {
-		    /* This is case 7 as described above. */
+#ifdef RBTREE_DEBUG
+		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
+			   p, n );
+		  fprintf( stderr, "case 6\n" );
+#endif
 
-		    rbtree_rotate_right( t, p );
-		    s->color = RED;
-		    p->color = BLACK;
-		    s->left->color = BLACK;
-		  }
-		  else status = RBTREE_ERROR;
+		  s->right->color = BLACK;
+		  s->color = p->color;
+		  p->color = BLACK;
+
+		  rbtree_rotate_left( t, p );
+
+#ifdef RBTREE_DEBUG
+		  rbtree_dump( t,
+			       rbtree_string_printer,
+			       rbtree_string_printer );
+#endif
 		}
 		else status = RBTREE_ERROR;
 	      }
 	      else status = RBTREE_ERROR;
 	    }
+	    else if ( p->right == n ) {
+	      if ( p->left == s ) {
+		if ( ( s->right && s->right->color == RED ) &&
+		     ( !(s->left) || s->left->color == BLACK ) ) {
+		  /* This is case 5 as described above. */
+
+#ifdef RBTREE_DEBUG
+		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
+			   p, n );
+		  fprintf( stderr, "case 5 (s is %p)\n", s );
+#endif
+
+		  s->right->color = BLACK;
+		  s->color = RED;
+
+		  rbtree_rotate_left( t, s );
+
+		  /*
+		   * The old right child of s is the new sister of n,
+		   * and ended up the parent of s after the rotation.
+		   */
+		  s = s->up;
+
+#ifdef RBTREE_DEBUG
+		  rbtree_dump( t,
+			       rbtree_string_printer,
+			       rbtree_string_printer );
+#endif
+		}
+
+		/*
+		 * This must be true, since at least one of them is
+		 * red or we would have hit case 3, and if it was
+		 * the right one we just moved it above.
+		 */
+
+		if ( s->left && s->left->color == RED ) {
+		  /* This is case 7 as described above. */
+#ifdef RBTREE_DEBUG
+		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
+			   p, n );
+		  fprintf( stderr, "case 7\n" );
+#endif
+
+		  s->left->color = BLACK;
+		  s->color = p->color;
+		  p->color = BLACK;
+
+		  rbtree_rotate_right( t, p );
+
+#ifdef RBTREE_DEBUG
+		  rbtree_dump( t,
+			       rbtree_string_printer,
+			       rbtree_string_printer );
+#endif
+		}
+		else status = RBTREE_ERROR;
+	      }
+	      else status = RBTREE_ERROR;
+	    }
+	    else status = RBTREE_ERROR;
 	  }
 	}
 	else status = RBTREE_ERROR;
@@ -1018,7 +1165,6 @@ static void rbtree_rotate_left( rbtree *t, rbtree_node *n ) {
       if ( n->right ) n->right->up = n;
       n->up = child;
       child->left = n;
-      if ( child->left ) child->left->up = child;
       child->up = parent;
       if ( parent ) {
 	if ( parent->left == n ) parent->left = child;
@@ -1047,7 +1193,6 @@ static void rbtree_rotate_right( rbtree *t, rbtree_node *n ) {
       if ( n->left ) n->left->up = n;
       n->up = child;
       child->right = n;
-      if ( child->right ) child->right->up = child;
       child->up = parent;
       if ( parent ) {
 	if ( parent->left == n ) parent->left = child;
