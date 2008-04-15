@@ -5,6 +5,10 @@
 
 #undef RBTREE_DEBUG
 
+static void rbtree_clear_key_and_value( rbtree *, rbtree_node * );
+static int rbtree_delete_and_fixup( rbtree *, rbtree_node * );
+static int rbtree_delete_node( rbtree *, rbtree_node *, void *, void ** );
+static int rbtree_delete_rebalance( rbtree *, rbtree_node *, rbtree_node * );
 static void rbtree_dump_node( rbtree_node *, int,
 			      void (*)( void * ), void (*)( void * ) );
 static void rbtree_dump_print_spaces( int );
@@ -22,6 +26,7 @@ static void rbtree_insert_post( rbtree *, rbtree_node * );
 static int rbtree_query_node( rbtree_node *,
 			      int (*)( void *, void * ),
 			      void *, void ** );
+static int rbtree_replace_node( rbtree *, rbtree_node *, rbtree_node * );
 static void rbtree_rotate_left( rbtree *, rbtree_node * );
 static void rbtree_rotate_right( rbtree *, rbtree_node * );
 static int rbtree_validate_internal( rbtree_node *, int, int *,
@@ -48,6 +53,466 @@ rbtree * rbtree_alloc( int (*comparator)( void *, void * ),
     return t;
   }
   else return NULL;
+}
+
+static void rbtree_clear_key_and_value( rbtree *t, rbtree_node *n ) {
+  if ( t && n ) {
+    if ( n->key ) {
+      if ( t->copy_key && t->free_key ) t->free_key( n->key );
+      n->key = NULL;
+    }
+    if ( n->value ) {
+      if ( t->copy_val && t->free_val ) t->free_val( n->value );
+      n->value = NULL;
+    }    
+  }
+}
+
+static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
+  /*
+   * This function is called by rbtree_delete_node().  The node n has
+   * zero or one children, and its key and value have already been
+   * cleared.  We have to delete it and fix up the tree invariants.
+   *
+   * We have the following cases to consider:
+   *
+   * Case 1: n is the root node.  It must necessarily be black.  If a
+   * child exists, it may be either red or black.  If it is red, we
+   * can make it black and make it the new root without violating any
+   * invariants, since all paths to leaves pass through it.
+   *
+   * Case 2: n is red.  Its child, if one exists, must necessarily be
+   * black.  We can delete it and replace it with its child, if any,
+   * without breaking any invariants.
+   *
+   * Case 3: n is black, and its child exists and is red.  We can
+   * remove n and replace it with its child, and turn the child black
+   * to keep all the needed invariants.
+   *
+   * Remaining cases: n is black, not the root, and has no children or
+   * a black child.  This is the complex case with rotations and
+   * recursion.  Since n is not the root, it has a parent p.  Since n
+   * is black, it must have a sister s, or property 3 would fail.  In
+   * all cases, we start by deleting n and replacing it with its child
+   * (or just deleting it if no child exists), and then call
+   * rbtree_delete_rebalance() to rebalance it.
+   */
+
+  rbtree_node **parent_ptr;
+  rbtree_node *child, *parent, *sister;
+  int status;
+
+  status = RBTREE_SUCCESS;
+  if ( t && n ) {
+    /* n has at most one child; we keep it here */
+    if ( n->left ) child = n->left;
+    else if ( n->right ) child = n->right;
+    else child = NULL;
+
+    if ( n->up == NULL ) {
+      /* Case 1: n is the root */
+
+      if ( t->root == n ) {
+	if ( child ) {
+	  child->up = NULL;
+	  child->color = BLACK;
+	  t->root = child;
+	}
+	else t->root = NULL;
+	free( n );
+      }
+      else status = RBTREE_ERROR;
+    }
+    else {
+      /* n is not the root */
+
+      parent = n->up;
+      if ( n->up->left == n ) parent_ptr = &(n->up->left);
+      else if ( n->up->right == n ) parent_ptr = &(n->up->right);
+      else status = RBTREE_ERROR;
+
+      if ( status == RBTREE_SUCCESS ) {
+	if ( n->color == RED ) {
+	  /* Case 2: n is red */
+	  if ( child ) {
+	    *parent_ptr = child;
+	    child->up = parent;
+	  }
+	  else parent_ptr = NULL;
+	  free( n );
+	}
+	else if ( n->color == BLACK ) {
+	  if ( child && child->color == RED ) {
+	    /* Case 3: n is black, and its child exists and is red */
+	    *parent_ptr = child;
+	    child->up = parent;
+	    child->color = BLACK;
+	    free( n );
+	  }
+	  else {
+	    *parent_ptr = child;
+	    if ( child ) {
+	      child->up = parent;
+	      child->color = BLACK;
+	    }
+	    free( n );
+	    status = rbtree_delete_rebalance( t, parent, child );
+	  }
+	}
+	else status = RBTREE_ERROR;
+      }
+    }
+  }
+  else status = RBTREE_ERROR;
+  return status;
+}
+
+static int rbtree_delete_node( rbtree *t, rbtree_node *n,
+			       void *k, void **vout ) {
+  int status, result;
+  rbtree_node *ntmp;
+  void *v;
+
+  status = RBTREE_SUCCESS;
+  if ( t ) {
+    if ( n ) {
+      result = t->comparator( k, n->key );
+      if ( result < 0 ) {
+	/*
+	 * The node, if it exists, will be in the left subtree
+	 */
+
+	result = rbtree_delete_node( t, n->left, k, vout );
+	if ( result != RBTREE_SUCCESS ) status = result;
+      }
+      else if ( result == 0 ) {
+	/*
+	 * This node matches.  If it has two children, then we can
+	 * pull a value out of one side into this node, and reduce the
+	 * problem to deleting a node with zero or one children.  Once
+	 * we have such a node, we can call rbtree_delete_and_fixup()
+	 * on it.
+	 */
+
+	if ( vout ) {
+	  if ( n->value ) {
+	    if ( t->copy_val && t->free_val ) {
+	      v = t->copy_val( n->value );
+	      if ( v ) *vout = v;
+	      else status = RBTREE_ERROR;
+	    }
+	    else *vout = n->value;
+	  }
+	  else *vout = NULL;
+	}
+	if ( status == RBTREE_SUCCESS ) {
+	  /*
+	   * If we have a left and right subtree, we have to pick a
+	   * node from one of the subtrees to move the key and value
+	   * from to this node, and then rbtree_delete_and_fixup() on
+	   * that node.  Otherwise, we can directly
+	   * rbtree_delete_and_fixup() on this node.
+	   */
+
+	  if ( n->left && n->right ) {
+	    /*
+	     * We could pick either the last node of the left subtree,
+	     * or the first node of the right subtree here.  Since we
+	     * already have rbtree_get_first(), we'll go with the
+	     * latter.
+	     */
+
+	    ntmp = rbtree_get_first( n->right );
+	    if ( ntmp ) {
+	      /*
+	       * Clear out n, move the key and value from ntmp to it,
+	       * and then call rbtree_delete_and_fixup() on ntmp.
+	       */
+
+	      rbtree_clear_key_and_value( t, n );
+	      n->key = ntmp->key;
+	      n->value = ntmp->value;
+	      ntmp->key = NULL;
+	      ntmp->value = NULL;
+	      result = rbtree_delete_and_fixup( t, ntmp );
+	      if ( result != RBTREE_SUCCESS ) status = result;
+	    }
+	    else {
+	      /*
+	       * This shouldn't happen, return an error and give up.
+	       */
+
+	      status = RBTREE_ERROR;
+	    }
+	  }
+	  else {
+	    /*
+	     * Clear out n and call rbtree_delete_and_fixup() on it.
+	     */
+
+	    rbtree_clear_key_and_value( t, n );
+	    result = rbtree_delete_and_fixup( t, n );
+	    if ( result != RBTREE_SUCCESS ) status = result;
+	  }
+	}
+      }
+      else {
+	/*
+	 * The node, if it exists, will be in the right subtree
+	 */
+
+	result = rbtree_delete_node( t, n->right, k, vout );
+	if ( result != RBTREE_SUCCESS ) status = result;
+      }
+    }
+    else {
+      /*
+       * Nothing in this subtree, so return not found
+       */
+
+      status = RBTREE_NOT_FOUND;
+    }
+  }
+  else status = RBTREE_ERROR;
+  return status;
+}
+
+static int rbtree_delete_rebalance( rbtree *t,
+				    rbtree_node *p,
+				    rbtree_node *n ) {
+  /*
+   * rbtree_delete_rebalance() is called to rebalance the tree after a
+   * node is deleted in the complex case.  p is the parent of the node
+   * that was just deleted, and n, if not NULL, was the child put in
+   * its place.  If n is not NULL it must be black.  Since the deleted
+   * node must have been black, there must have been a sibling or
+   * property 3 would have failed.  We find the sibling and call it s.
+   *
+   * Case 1: s is red.  Since it has a red child, p must be black.  If
+   * n is the left child of p, we rotate left at p and make p red and
+   * s black.  If n is the right child of p, we rotate right at p and
+   * make p red and s black.  Since s was red and p and n were both
+   * black, for property 3 to hold s must have two black children, sl
+   * and sr.  Now p is red and has two black children, n and either sl
+   * or sr.  We have reduced to the case where n and s are black and p
+   * is red.
+   *
+   * Case 2: s is black and p is black.  We make s red, so all paths
+   * passing through s have one less black node.  Since a black node
+   * was deleted between p and n, those paths also were one black node
+   * short.  Thus, paths passing through p now all have the same
+   * number of black nodes again, but unless p is the root node they
+   * might be unbalanced against the rest of the tree.  Recurse on p
+   * and its parent.
+   *
+   * Case 3: s is black, p is red and both of the children of s either
+   * do not exist or are black.  If we make p black and s red, we have
+   * not changed the number of black nodes in paths through s, and we
+   * have increased by one the number of black nodes on paths through
+   * n, compensating for the original deletion.
+   *
+   * Case 4: p is red, n and s are black.  n is the left child of p,
+   * and s is the right child of p.  The left child of s exists and is
+   * red, and the right child of s does not exist or is black.  We
+   * rotate right at s, so that the red left child of s becomes n's
+   * new sibling and the black s becomes its new left child.  We make
+   * the new sibling black and the old one red, and then we relabel
+   * the former left child of s to s and fall through to case 6.
+   * Paths that passed through the left child of s now either pass
+   * through it in its new position, or through it then s, but not
+   * through the right child of s, if any, and thus have the same
+   * number of black nodes as before.  Paths that passed through the
+   * right child of s, if any, now pass through the former left child,
+   * then s, then the right child, and thus have the same number of
+   * black nodes as before.
+   *
+   * Case 5: p is red, n and s are black.  s is the left child of p,
+   * and n is the right child of p.  The right child of s exists and
+   * is red, and the left child of s does not exist or is black.  We
+   * rotate left at s, so that the red right child of s becomes n's
+   * new sibling and the black s becomes its new right child.  We make
+   * the new sibling black and the old one red, and then we relabel
+   * the former right child of s to s and fall through to case 7.
+   * Paths that passed through the right child of s now either pass
+   * through it in its new position, or through it then s, but not
+   * through the left child of s, if any, and thus have the same
+   * number of black nodes as before.  Paths that passed through the
+   * left child of s, if any, now pass through the former right child,
+   * then s, then the left child, and thus have the same number of
+   * black nodes as before.
+   * 
+   * Case 6: p is red, n and s are black.  n is the left child of p,
+   * and s is the right child of p.  The right child of s exists and
+   * is red.  We rotate left at p, so now s is the parent of p and its
+   * former right child.  We make s red and p black, and make the red
+   * right child of s black.  The subtree still has a red node at its
+   * root, and now an additional black node sits between it and n,
+   * compensating for the one lost in deletion.  The paths not passing
+   * through n either pass through p to its new other child (the
+   * former left child of s) instead of s, and hence have the same
+   * number of black nodes (p is black now, as s was), or they pass
+   * through red s and then the now-black right child of s instead of
+   * red p, black s and the red right child of s, and hence have the
+   * same number of black nodes.
+   *
+   * Case 7: p is red, n and s are black.  n is the right child of p,
+   * and s is the left child of p.  The left child of s exists and is
+   * red.  We rotate right at p, so now s is the parent of p and its
+   * former left child.  We make s red and p black, and make the red
+   * left child of s black.  The subtree still has a red node at its
+   * root, and now an additional black node sits between it and n,
+   * compensating for the one lost in deletion.  The paths not passing
+   * through n either pass through p to its new other child (the
+   * former right child of s) instead of s, and hence have the same
+   * number of black nodes (p is black now, as s was), or they pass
+   * through red s and then the now-black left child of s instead of
+   * red p, black s and the red left child of s, and hence have the
+   * same number of black nodes.
+   *
+   */
+
+  int status;
+  rbtree_node *s;
+
+  status = RBTREE_SUCCESS;
+  if ( t && p ) {
+    if ( !n || n->color == BLACK ) {
+      if ( p->left == n ) s = p->right;
+      else if ( p->right == n ) s = p->left;
+      else {
+	s = NULL;
+	status = RBTREE_ERROR;
+      }
+
+      if ( s && status == RBTREE_SUCCESS ) {
+	/* Case 1: s is red */
+	if ( s->color == RED ) {
+	  if ( p->left == n ) {
+	    rbtree_rotate_left( t, p );
+	    p->color = RED;
+	    s->color = BLACK;
+	    s = s->left;
+	  }
+	  else if ( p->right == n ) {
+	    rbtree_rotate_right( t, p );
+	    p->color = RED;
+	    s->color = BLACK;
+	    s = s->right;
+	  }
+	  else status = RBTREE_ERROR;
+	}
+
+	/* We fall through to the next case */
+
+	if ( s && s->color == BLACK ) {
+	  if ( p->color == BLACK ) {
+	    /*
+	     * p, n and s are all black.  This is case 2 above.  We
+	     * make s red, and if p is the root, we're done.
+	     * Otherwise, recurse.
+	     */
+
+	    s->color = RED;
+	    if ( p->up ) status = rbtree_delete_rebalance( t, p->up, p );
+	  }
+	  else {
+	    /*
+	     * p is red, n and s are both black.
+	     */
+
+	    if ( ( !(s->left) || s->left->color == BLACK ) &&
+		 ( !(s->right) || s->right->color == BLACK ) ) {
+	      /* Case 3; we make p black and s red and we're done */
+
+	      p->color = BLACK;
+	      s->color = RED;
+	    }
+	    else {
+	      /*
+	       * p is red, n and s are both black, at least one child
+	       * of s exists and is red.
+	       */
+
+	      if ( p->left == n ) {
+		if ( p->right == s ) {
+		  if ( ( s->left && s->left->color == RED ) &&
+		       ( !(s->right) || s->right->color == BLACK ) ) {
+		    /* This is case 4 as described above. */
+
+		    rbtree_rotate_right( t, s );
+		    s->left->color = BLACK;
+		    s->color = RED;
+		    s = s->left;
+		  }
+
+		  /*
+		   * This must be true, since at least one of them is
+		   * red or we would have hit case 3, and if it was
+		   * the left one we just moved it above.
+		   */
+
+		  if ( s->right && s->right->color == RED ) {
+		    /* This is case 6 as described above. */
+
+		    rbtree_rotate_left( t, p );
+		    s->color = RED;
+		    p->color = BLACK;
+		    s->right->color = BLACK;
+		  }
+		  else status = RBTREE_ERROR;
+		}
+		else status = RBTREE_ERROR;
+	      }
+	      else if ( p->right == n ) {
+		if ( p->left == s ) {
+		  if ( ( s->right && s->right->color == RED ) &&
+		       ( !(s->left) || s->left->color == BLACK ) ) {
+		    /* This is case 5 as described above. */
+
+		    rbtree_rotate_left( t, s );
+		    s->right->color = BLACK;
+		    s->color = RED;
+		    s = s->right;
+		  }
+
+		  /*
+		   * This must be true, since at least one of them is
+		   * red or we would have hit case 3, and if it was
+		   * the right one we just moved it above.
+		   */
+
+		  if ( s->left && s->left->color == RED ) {
+		    /* This is case 7 as described above. */
+
+		    rbtree_rotate_right( t, p );
+		    s->color = RED;
+		    p->color = BLACK;
+		    s->left->color = BLACK;
+		  }
+		  else status = RBTREE_ERROR;
+		}
+		else status = RBTREE_ERROR;
+	      }
+	      else status = RBTREE_ERROR;
+	    }
+	  }
+	}
+	else status = RBTREE_ERROR;
+      }
+      else status = RBTREE_ERROR;
+    }
+    else status = RBTREE_ERROR;
+  }
+  else status = RBTREE_ERROR;
+  return status;
+}
+
+int rbtree_delete( rbtree *t, void *k, void **vout ) {
+  int result;
+
+  if ( t )
+    return rbtree_delete_node( t, t->root, k, vout );
+  else return RBTREE_ERROR;
 }
 
 static void rbtree_dump_node( rbtree_node *n, int depth,
@@ -516,6 +981,30 @@ int rbtree_query( rbtree *t, void *key, void **val_out ) {
     return result;
   }
   else return RBTREE_ERROR;
+}
+
+static int rbtree_replace_node( rbtree *t, rbtree_node *m, rbtree_node *n ) {
+  /*
+   * Substitute n into m's place in the tree.  Make sure in advance
+   * that n has the same children as m, has the same color, or the
+   * tree will get screwed up.
+   */
+
+  rbtree_node **mptr;
+  int status;
+
+  status = RBTREE_SUCCESS;
+  if ( t && m ) {
+    if ( m->up ) {
+      if ( m == m->up->left ) mptr = &(m->up->left);
+      else if ( m == m->up->right ) mptr = &(m->up->right);
+      else status = RBTREE_ERROR;
+    }
+    else mptr = &(t->root);
+    if ( status == RBTREE_SUCCESS ) *mptr = n;
+  }
+  else status = RBTREE_ERROR;
+  return status;
 }
 
 static void rbtree_rotate_left( rbtree *t, rbtree_node *n ) {

@@ -30,7 +30,7 @@ rbtree * rbtree_alloc( int (*)( void *, void * ), /* comparator */
 		       void * (*)( void * ), /* copy_val */
 		       void (*)( void * ) /* free_val */
 		       );
-int rbtree_delete( rbtree *, void * );
+int rbtree_delete( rbtree *, void *, void ** );
 void rbtree_dump( rbtree *, void (*)( void * ), void (*)( void * ) );
 void * rbtree_enum( rbtree *, rbtree_node *, void **, rbtree_node ** );
 void rbtree_free( rbtree * );
