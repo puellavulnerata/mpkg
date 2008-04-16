@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,6 +21,16 @@ char * copy_string( char *s ) {
     else return NULL;
   }
   else return NULL;
+}
+
+void dbg_printf( char const *file, int line, char const *fmt, ... ) {
+  va_list s;
+
+  fprintf( stderr, "%s(%d): ", file, line );
+  va_start( s, fmt );
+  vfprintf( stderr, fmt, s );
+  va_end( s );
+  fprintf( stderr, "\n" );
 }
 
 char * hash_to_string( unsigned char *hash, unsigned long len ) {

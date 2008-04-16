@@ -5,6 +5,14 @@
 
 #undef RBTREE_DEBUG
 
+#define rberr(...) dbg_printf( __FILE__, __LINE__, __VA_ARGS__ )
+
+#ifdef RBTREE_DEBUG
+#define rbdbg(...) dbg_printf( __FILE__, __LINE__, __VA_ARGS__ )
+#else
+#define rbdbg(...)
+#endif
+
 static void rbtree_clear_key_and_value( rbtree *, rbtree_node * );
 static int rbtree_delete_and_fixup( rbtree *, rbtree_node * );
 static int rbtree_delete_node( rbtree *, rbtree_node *, void *, void ** );
@@ -112,10 +120,7 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
     if ( n->up == NULL ) {
       /* Case 1: n is the root */
 
-#ifdef RBTREE_DEBUG
-      fprintf( stderr,
-	       "rbtree_delete_and_fixup( %p ): case 1, n is the root\n", n );
-#endif
+      rbdbg( "rbtree_delete_and_fixup( %p ): case 1, n is the root\n", n );
 
       if ( t->root == n ) {
 	if ( child ) {
@@ -139,11 +144,8 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
       if ( status == RBTREE_SUCCESS ) {
 	if ( n->color == RED ) {
 
-#ifdef RBTREE_DEBUG
-	  fprintf( stderr,
-		   "rbtree_delete_and_fixup( %p ): ", n );
-	  fprintf( stderr, "case 2, n is not the root and is red\n" );
-#endif
+	  rbdbg( "rbtree_delete_and_fixup( %p ): case 2, n is not the root and is red\n",
+		 n );
 
 	  /* Case 2: n is red */
 	  if ( child ) {
@@ -156,12 +158,8 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 	else if ( n->color == BLACK ) {
 	  if ( child && child->color == RED ) {
 
-#ifdef RBTREE_DEBUG
-	    fprintf( stderr,
-		     "rbtree_delete_and_fixup( %p ): ", n );
-	    fprintf( stderr, "case 3, n is not the root and is black " );
-	    fprintf( stderr, "and has a red child\n" );
-#endif
+	    rbdbg( "rbtree_delete_and_fixup( %p ): case 3, n is not the root and is black and has a red child\n",
+		   n );
 
 	    /* Case 3: n is black, and its child exists and is red */
 	    *parent_ptr = child;
@@ -171,17 +169,7 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 	  }
 	  else {
 
-#ifdef RBTREE_DEBUG
-	    fprintf( stderr,
-		     "rbtree_delete_and_fixup( %p ): ", n );
-	    fprintf( stderr, "n is not the root and is black " );
-	    fprintf( stderr, "and has a black child, we call " );
-	    fprintf( stderr, "rbtree_delete_rebalance()\n" );
-	    rbtree_dump( t,
-			 rbtree_string_printer,
-			 rbtree_string_printer );
-	    
-#endif
+	    rbdbg( "rbtree_delete_and_fixup( %p ): n is not the root and is black and has a black child, we call rbtree_delete_rebalance()\n", n );
 	    
 	    *parent_ptr = child;
 	    if ( child ) {
@@ -190,13 +178,8 @@ static int rbtree_delete_and_fixup( rbtree *t, rbtree_node *n ) {
 	    }
 	    free( n );
 
-#ifdef RBTREE_DEBUG
-	    fprintf( stderr, "deleted n and put its child in its place," );
-	    fprintf( stderr, " about to call rbtree_delete_rebalance()\n" );
-	    rbtree_dump( t,
-			 rbtree_string_printer,
-			 rbtree_string_printer );
-#endif
+	    rbdbg( "rbtree_delete_and_fixup( %p ): deleted n and put its child in its place, about to call rbtree_delete_rebalance()\n",
+		   n );
 
 	    status = rbtree_delete_rebalance( t, parent, child );
 	  }
@@ -430,10 +413,8 @@ static int rbtree_delete_rebalance( rbtree *t,
 
 	if ( s->color == RED ) {
 
-#ifdef RBTREE_DEBUG
-	  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
-	  fprintf( stderr, "case 1; s is red\n" );
-#endif
+	  rbdbg( "rbtree_delete_rebalance( %p, %p ): case 1; s is red\n",
+		 p, n );
 
 	  if ( p->left == n ) {
 	    rbtree_rotate_left( t, p );
@@ -448,13 +429,6 @@ static int rbtree_delete_rebalance( rbtree *t,
 	    s = p->left;
 	  }
 	  else status = RBTREE_ERROR;
-
-#ifdef RBTREE_DEBUG
-	  rbtree_dump( t,
-		       rbtree_string_printer,
-		       rbtree_string_printer );
-#endif
-
 	}
 
 	/* We fall through to the next case */
@@ -470,56 +444,30 @@ static int rbtree_delete_rebalance( rbtree *t,
 	       * Otherwise, recurse.
 	       */
 
-#ifdef RBTREE_DEBUG
-	      fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
-	      fprintf( stderr, "case 2; p, n and s (%p) are all black\n",
-		       s );
-#endif
+	      rbdbg( "rbtree_delete_rebalance( %p, %p ): case 2; p, n and s (%p) are all black\n",
+		     p, n, s );
 
 	      s->color = RED;
-
-#ifdef RBTREE_DEBUG
-	      rbtree_dump( t,
-			   rbtree_string_printer,
-			   rbtree_string_printer );
-#endif
-
 	      if ( p->up ) {
 
-#ifdef RBTREE_DEBUG
-		fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
-		fprintf( stderr, "case 2 about to recurse\n" );
-#endif
+		rbdbg( "rbtree_delete_rebalance( %p, %p ): case 2 about to recurse\n",
+		       p, n );
 
 		status = rbtree_delete_rebalance( t, p->up, p );
 	      }
-
-#ifdef RBTREE_DEBUG
 	      else {
-		fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
-		fprintf( stderr, "case 2 at the root, we're done\n" );
+		rbdbg( "rbtree_delete_rebalance( %p, %p ): case 2 at the root, we're done\n",
+		       p, n );
 	      }
-#endif
-
 	    }
 	    else if ( p->color == RED ) {
 	      /* Case 3; we make p black and s red and we're done */
 
-#ifdef RBTREE_DEBUG
-	      fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ", p, n );
-	      fprintf( stderr, "case 3, p red, n and s black," ); 
-	      fprintf( stderr, " both children of s black\n" );
-#endif
+	      rbdbg( "rbtree_delete_rebalance( %p, %p ): case 3, p red, n and s black, both children of s black\n",
+		     p, n );
 	      
 	      p->color = BLACK;
 	      s->color = RED;
-
-#ifdef RBTREE_DEBUG
-	      rbtree_dump( t,
-			   rbtree_string_printer,
-			   rbtree_string_printer );
-#endif
-
 	    }
 	    else status = RBTREE_ERROR;
 	  }
@@ -534,28 +482,13 @@ static int rbtree_delete_rebalance( rbtree *t,
 		     ( !(s->right) || s->right->color == BLACK ) ) {
 		  /* This is case 4 as described above. */
 
-#ifdef RBTREE_DEBUG
-		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
-			   p, n );
-		  fprintf( stderr, "case 4 (s is %p)\n", s );
-#endif
+		  rbdbg( "rbtree_delete_rebalance( %p, %p ): case 4 (s is %p)\n",
+			 p, n, s );
 
 		  s->left->color = BLACK;
 		  s->color = RED;
 
-#ifdef RBTREE_DEBUG
-		  fprintf( stderr,
-			   "About to call rbtree_rotate_right( %p, %p )\n",
-			   t, s );
-#endif
-
 		  rbtree_rotate_right( t, s );
-
-#ifdef RBTREE_DEBUG
-		  fprintf( stderr,
-			   "rbtree_rotate_right( %p, %p ) done\n",
-			   t, s );
-#endif
 
 		  /*
 		   * The old left child of s is the new sister of n,
@@ -563,13 +496,6 @@ static int rbtree_delete_rebalance( rbtree *t,
 		   */
 
 		  s = s->up;
-
-#ifdef RBTREE_DEBUG
-		  rbtree_dump( t,
-			       rbtree_string_printer,
-			       rbtree_string_printer );
-#endif
-
 		}
 
 		/*
@@ -581,24 +507,13 @@ static int rbtree_delete_rebalance( rbtree *t,
 		if ( s->right && s->right->color == RED ) {
 		  /* This is case 6 as described above. */
 
-#ifdef RBTREE_DEBUG
-		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
-			   p, n );
-		  fprintf( stderr, "case 6\n" );
-#endif
+		  rbdbg( "rbtree_delete_rebalance( %p, %p ): case 6\n", p, n );
 
 		  s->right->color = BLACK;
 		  s->color = p->color;
 		  p->color = BLACK;
 
 		  rbtree_rotate_left( t, p );
-
-#ifdef RBTREE_DEBUG
-		  rbtree_dump( t,
-			       rbtree_string_printer,
-			       rbtree_string_printer );
-#endif
-
 		}
 		else status = RBTREE_ERROR;
 	      }
@@ -610,11 +525,8 @@ static int rbtree_delete_rebalance( rbtree *t,
 		     ( !(s->left) || s->left->color == BLACK ) ) {
 		  /* This is case 5 as described above. */
 
-#ifdef RBTREE_DEBUG
-		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
-			   p, n );
-		  fprintf( stderr, "case 5 (s is %p)\n", s );
-#endif
+		  rbdbg( "rbtree_delete_rebalance( %p, %p ): case 5 (s is %p)\n",
+			 p, n, s );
 
 		  s->right->color = BLACK;
 		  s->color = RED;
@@ -626,13 +538,6 @@ static int rbtree_delete_rebalance( rbtree *t,
 		   * and ended up the parent of s after the rotation.
 		   */
 		  s = s->up;
-
-#ifdef RBTREE_DEBUG
-		  rbtree_dump( t,
-			       rbtree_string_printer,
-			       rbtree_string_printer );
-#endif
-
 		}
 
 		/*
@@ -644,24 +549,13 @@ static int rbtree_delete_rebalance( rbtree *t,
 		if ( s->left && s->left->color == RED ) {
 		  /* This is case 7 as described above. */
 
-#ifdef RBTREE_DEBUG
-		  fprintf( stderr, "rbtree_delete_rebalance( %p, %p ): ",
-			   p, n );
-		  fprintf( stderr, "case 7\n" );
-#endif
+		  rbdbg( "rbtree_delete_rebalance( %p, %p ): case 7\n", p, n );
 
 		  s->left->color = BLACK;
 		  s->color = p->color;
 		  p->color = BLACK;
 
 		  rbtree_rotate_right( t, p );
-
-#ifdef RBTREE_DEBUG
-		  rbtree_dump( t,
-			       rbtree_string_printer,
-			       rbtree_string_printer );
-#endif
-
 		}
 		else status = RBTREE_ERROR;
 	      }
@@ -994,9 +888,9 @@ static void rbtree_insert_post( rbtree *t, rbtree_node *n ) {
 	  n->up->color = BLACK;
 	  aunt->color = BLACK;
 	  grandparent->color = RED;
-#ifdef RBTREE_DEBUG
-	  fprintf( stderr, "rbtree_insert_post(): case 3 (%p)\n", n );
-#endif
+
+	  rbdbg( "rbtree_insert_post(): case 3 (%p)\n", n );
+
 	  rbtree_insert_post( t, grandparent );
 	}
 	else {
@@ -1010,9 +904,9 @@ static void rbtree_insert_post( rbtree *t, rbtree_node *n ) {
 
 	  if ( n->up->left == n ) {
 	    if ( n->up == grandparent->left ) {
-#ifdef RBTREE_DEBUG
-	      fprintf( stderr, "rbtree_insert_post(): case 6 (%p)\n", n );
-#endif
+
+	      rbdbg( "rbtree_insert_post(): case 6 (%p)\n", n );
+
 	      n->up->color = BLACK;
 	      grandparent->color = RED;
 	      rbtree_rotate_right( t, grandparent );
@@ -1020,42 +914,39 @@ static void rbtree_insert_post( rbtree *t, rbtree_node *n ) {
 	    else if ( n->up == grandparent->right ) {
 	      /* A right rotation will fix things up */
 
-#ifdef RBTREE_DEBUG	
-	      fprintf( stderr, "rbtree_insert_post(): case 4 (%p)\n", n );
-#endif
+	      rbdbg( "rbtree_insert_post(): case 4 (%p)\n", n );
+
 	      rbtree_rotate_right( t, n->up );
 	      n->color = BLACK;
 	      grandparent->color = RED;
 	      rbtree_rotate_left( t, grandparent );
 	    }
 	    else {
-	      fprintf( stderr, "Inconsistency seen in rbtree_insert_post( %p ): parent not child of grandparent\n",
-		       n );
+	      rberr( "Inconsistency seen in rbtree_insert_post( %p ): parent not child of grandparent\n",
+		     n );
 	    }
 	  }
 	  else if ( n->up->right == n ) {
 	    if ( n->up == grandparent->left ) {
 	      /* A left rotation will fix things up */
 
-#ifdef RBTREE_DEBUG
-	      fprintf( stderr, "rbtree_insert_post(): case 5 (%p)\n", n );
-#endif
+	      rbdbg( "rbtree_insert_post(): case 5 (%p)\n", n );
+
 	      rbtree_rotate_left( t, n->up );
 	      n->color = BLACK;
 	      grandparent->color = RED;
 	      rbtree_rotate_right( t, grandparent );
 	    }
 	    else if ( n->up == grandparent->right ) {
-#ifdef RBTREE_DEBUG
-	      fprintf( stderr, "rbtree_insert_post(): case 7 (%p)\n", n );
-#endif
+	      rbdbg( "rbtree_insert_post(): case 7 (%p)\n", n );
+
 	      n->up->color = BLACK;
 	      grandparent->color = RED;
 	      rbtree_rotate_left( t, grandparent );
 	    }
 	    else {
-	      fprintf( stderr, "Inconsistency seen in rbtree_insert_post( %p ): parent not child of grandparent\n",
-		       n );
+	      rberr( "Inconsistency seen in rbtree_insert_post( %p ): parent not child of grandparent\n",
+		     n );
 	    }
 	  }
 	  else {
@@ -1075,20 +966,17 @@ static void rbtree_insert_post( rbtree *t, rbtree_node *n ) {
 		 n );
       }
     }
-#ifdef RBTREE_DEBUG
     else {
-      fprintf( stderr, "rbtree_insert_post(): case 2 (%p)\n", n );
+      rbdbg( "rbtree_insert_post(): case 2 (%p)\n", n );
     }
-#endif
   }
   else {
     /*
      * This is the root, make sure it's black and we're done
      */
 
-#ifdef RBTREE_DEBUG
-    fprintf( stderr, "rbtree_insert_post(): case 1 (%p)\n", n );
-#endif
+    rbdbg( "rbtree_insert_post(): case 1 (%p)\n", n );
+
     n->color = BLACK;
   }
 }
@@ -1290,18 +1178,17 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
     if ( depth == 0 ) {
       /* The root node must be black */
       if ( n->color != BLACK ) {
-#ifdef RBTREE_DEBUG
-	fprintf( stderr, "Validation failed (%p): the root node must be black.\n",
-		 n );
-#endif
+	rbdbg( "Validation failed (%p): the root node must be black.\n",
+	       n );
+
 	return 0;
       }
       /* The root node has no parent */
       if ( n->up ) {
-#ifdef RBTREE_DEBUG
-	fprintf( stderr, "Validation failed (%p): the root node must not have a parent.\n",
-		 n );
-#endif
+
+	rbdbg( "Validation failed (%p): the root node must not have a parent.\n",
+	       n );
+
 	return 0;
       }
     }
@@ -1309,29 +1196,27 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
       if ( n->up ) {
 	/* The node must be a child of its parent */
 	if ( !( n->up->left == n || n->up->right == n ) ) {
-#ifdef RBTREE_DEBUG
-	  fprintf( stderr, "Validation failed (%p): a node must be a child of its parent.\n",
-		   n );
-#endif
+
+	  rbdbg( "Validation failed (%p): a node must be a child of its parent.\n",
+		 n );
+
 	  return 0;
 	}
       }
       else {
 	/* The node must have a parent */
 
-#ifdef RBTREE_DEBUG
-	fprintf( stderr, "Validation failed (%p): a non-root node must have a parent.\n",
-		 n );
-#endif
+	rbdbg( "Validation failed (%p): a non-root node must have a parent.\n",
+	       n );
+
 	return 0;
       }
     }
     /* The color must be red or black */
     if ( !( n->color == RED || n->color == BLACK ) ) {
-#ifdef RBTREE_DEBUG
-      fprintf( stderr, "Validation failed (%p): a node must be either red or black.\n",
-	       n );
-#endif
+
+      rbdbg( "Validation failed (%p): a node must be either red or black.\n",
+	     n );
 
       return 0;
     }
@@ -1339,19 +1224,19 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
     if ( n->color == RED ) {
       if ( n->left ) {
 	if ( n->left->color != BLACK ) {
-#ifdef RBTREE_DEBUG
-	  fprintf( stderr, "Validation failed (%p): the left child of a red node must be black.\n",
-		   n );
-#endif
+
+	  rbdbg( "Validation failed (%p): the left child of a red node must be black.\n",
+		 n );
+
 	  return 0;
 	}
       }
       if ( n->right ) {
 	if ( n->right->color != BLACK ) {
-#ifdef RBTREE_DEBUG
-	  fprintf( stderr, "Validation failed (%p): the right child of a red node must be black.\n",
-		   n );
-#endif
+
+	  rbdbg( "Validation failed (%p): the right child of a red node must be black.\n",
+		 n );
+
 	  return 0;
 	}
       }
@@ -1360,10 +1245,10 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
     if ( n->left ) {
       result = comparator( n->left->key, n->key );
       if ( result >= 0 ) {
-#ifdef RBTREE_DEBUG
-	fprintf( stderr, "Validation failed (%p): the left child of a node must be less than that node.\n",
-		 n );
-#endif
+
+	rbdbg( "Validation failed (%p): the left child of a node must be less than that node.\n",
+	       n );
+
 	return 0;
       }
     }
@@ -1371,8 +1256,9 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
     if ( n->right ) {
       result = comparator( n->key, n->right->key );
       if ( result >= 0 ) {
-	fprintf( stderr, "Validation failed (%p): the right child of a node must be greater than that node.\n",
-		 n );
+
+	rbdbg( "Validation failed (%p): the right child of a node must be greater than that node.\n",
+	       n );
 	return 0;
       }
     }
@@ -1382,10 +1268,10 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
 					 &left_black_nodes_to_leaves,
 					 comparator );
       if ( result == 0 ) {
-#ifdef RBTREE_DEBUG
-	fprintf( stderr, "Validation failed (%p): the left subtree of a node must be valid.\n",
-		 n );
-#endif
+
+	rbdbg( "Validation failed (%p): the left subtree of a node must be valid.\n",
+	       n );
+
 	return 0;
       }
     }
@@ -1395,10 +1281,10 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
 					 &right_black_nodes_to_leaves,
 					 comparator );
       if ( result == 0 ) {
-#ifdef RBTREE_DEBUG
-	fprintf( stderr, "Validation failed (%p): the right subtree of a node must be valid.\n",
-		 n );
-#endif
+
+	rbdbg( "Validation failed (%p): the right subtree of a node must be valid.\n",
+	       n );
+
 	return 0;
       }
     }
@@ -1408,10 +1294,10 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
      * both subtrees.
      */
     if ( left_black_nodes_to_leaves != right_black_nodes_to_leaves ) {
-#ifdef RBTREE_DEBUG
-      fprintf( stderr, "Validation failed (%p): the left and right subtrees of a node must be have the same number of black nodes to the leaves (%d, %d).\n",
-	       n, left_black_nodes_to_leaves, right_black_nodes_to_leaves );
-#endif
+
+      rbdbg( "Validation failed (%p): the left and right subtrees of a node must be have the same number of black nodes to the leaves (%d, %d).\n",
+	     n, left_black_nodes_to_leaves, right_black_nodes_to_leaves );
+
       return 0;
     }
     child_black_nodes_to_leaves = left_black_nodes_to_leaves;
@@ -1423,10 +1309,10 @@ static int rbtree_validate_internal( rbtree_node *n, int depth,
   }
   else {
     /* A NULL node is not valid */
-#ifdef RBTREE_DEBUG
-    fprintf( stderr, "Validation failed (%p): a node must not be NULL.\n",
-	     n );
-#endif
+
+    rbdbg( "Validation failed (%p): a node must not be NULL.\n",
+	   n );
+
     return 0;
   }
 }
@@ -1437,34 +1323,34 @@ int rbtree_validate( rbtree *t ) {
   if ( t ) {
     /* We must have a comparator */
     if ( !(t->comparator) ) {
-#ifdef RBTREE_DEBUG
-      fprintf( stderr, "Validation failed: a tree must have a comparator\n" );
-#endif
+
+      rbdbg( "Validation failed: a tree must have a comparator\n" );
+
       return 0;
     }
     if ( t->root ) {
       result = rbtree_validate_internal( t->root, 0, &black_nodes_to_leaves,
 				       t->comparator );
       if ( result == 1 ) {
-#ifdef RBTREE_DEBUG
-	fprintf( stderr, "Validation succeeded (%d)\n",
-		 black_nodes_to_leaves );
-#endif
+
+	rbdbg( "Validation succeeded (%d)\n",
+	       black_nodes_to_leaves );
+
       }
       return result;
     }
     /* It's an empty tree; that's okay */
     else {
-#ifdef RBTREE_DEBUG
-      fprintf( stderr, "Validation succeeded: empty tree\n" );
-#endif
+
+      rbdbg( "Validation succeeded: empty tree\n" );
+
       return 1;
     }
   }
   else {
-#ifdef RBTREE_DEBUG
-    fprintf( stderr, "Validation failed: a tree must not be NULL\n" );
-#endif
+
+    rbdbg( "Validation failed: a tree must not be NULL\n" );
+
     return 0;
   }
 }

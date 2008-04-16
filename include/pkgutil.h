@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 char * copy_string( char * );
+void dbg_printf( char const *, int, char const *, ... );
 char * hash_to_string( unsigned char *, unsigned long );
 int is_whitespace( char * );
 int parse_strings_from_line( char *, char *** );
