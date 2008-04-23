@@ -29,7 +29,8 @@ static rbtree_node * rbtree_get_parent( rbtree_node * );
 static rbtree_node * rbtree_get_sister( rbtree_node * );
 static int rbtree_insert_node( rbtree *, rbtree_node *,
 			       rbtree_node **,
-			       void *, void * );
+			       void *, void *,
+			       int );
 static void rbtree_insert_post( rbtree *, rbtree_node * );
 static int rbtree_query_node( rbtree_node *,
 			      int (*)( void *, void * ),
@@ -261,6 +262,7 @@ static int rbtree_delete_node( rbtree *t, rbtree_node *n,
 	      ntmp->value = NULL;
 	      result = rbtree_delete_and_fixup( t, ntmp );
 	      if ( result != RBTREE_SUCCESS ) status = result;
+	      if ( status == RBTREE_SUCCESS ) --(t->count);
 	    }
 	    else {
 	      /*
@@ -278,6 +280,7 @@ static int rbtree_delete_node( rbtree *t, rbtree_node *n,
 	    rbtree_clear_key_and_value( t, n );
 	    result = rbtree_delete_and_fixup( t, n );
 	    if ( result != RBTREE_SUCCESS ) status = result;
+	    if ( status == RBTREE_SUCCESS ) --(t->count);
 	  }
 	}
       }
@@ -759,9 +762,40 @@ static rbtree_node * rbtree_get_sister( rbtree_node *n ) {
   else return NULL;
 }
 
+int rbtree_insert_no_overwrite( rbtree *t, void *key, void *val ) {
+  int result, status;
+  void *k, *v;
+
+  status = RBTREE_SUCCESS;
+  if ( t && key ) {
+    if ( t->copy_key && t->free_key ) k = t->copy_key( key );
+    else k = key;
+    if ( ( key && k ) || ( !key && !k ) ) {
+      if ( t->copy_val && t->free_val ) v = t->copy_val( val );
+      else v = val;
+      if ( ( val && v ) || ( !val && !v ) ) {
+	result = rbtree_insert_node( t, NULL, &(t->root), k, v, 0 );
+	if ( result != RBTREE_SUCCESS ) {
+	  if ( k != key && t->free_key ) t->free_key( k );
+	  if ( v != val && t->free_val ) t->free_val( v );
+	  status = result;
+	}
+      }
+      else {
+	if ( k != key && t->free_key ) t->free_key( k );
+	status = RBTREE_ERROR;
+      }
+    }
+    else status = RBTREE_ERROR;
+  }
+  else status = RBTREE_ERROR;
+  return status;
+}
+
 static int rbtree_insert_node( rbtree *t, rbtree_node *parent,
 			       rbtree_node **n,
-			       void *k, void *v ) {
+			       void *k, void *v,
+			       int overwrite ) {
   rbtree_node *tmp;
   int c, result;
 
@@ -778,28 +812,37 @@ static int rbtree_insert_node( rbtree *t, rbtree_node *parent,
 	tmp->up = parent;
 	*n = tmp;
 	rbtree_insert_post( t, *n );
+	++(t->count);
+	result = RBTREE_SUCCESS;
       }
-      else return RBTREE_ERROR;
+      else result = RBTREE_ERROR;
     }
     else {
       c = t->comparator( k, (*n)->key );
       if ( c < 0 )
 	/* Insert it in the left subtree */
-	result = rbtree_insert_node( t, *n, &((*n)->left), k, v );
+	result = rbtree_insert_node( t, *n, &((*n)->left), k, v,
+				     overwrite );
       else if ( c == 0 ) {
 	/* Replace this value and key */
-	if ( t->free_key ) t->free_key( (*n)->key );
-	(*n)->key = k;
-	if ( t->free_val ) t->free_val( (*n)->value );
-	(*n)->value = v;
-	result = RBTREE_SUCCESS;
+	if ( overwrite ) {
+	  if ( t->free_key ) t->free_key( (*n)->key );
+	  (*n)->key = k;
+	  if ( t->free_val ) t->free_val( (*n)->value );
+	  (*n)->value = v;
+	  result = RBTREE_SUCCESS;
+	  /* We don't change the count to replace an existing node */
+	}
+	else result = RBTREE_NO_OVERWRITE;
       }
       else
 	/* Insert it in the right subtree */
-	result = rbtree_insert_node( t, *n, &((*n)->right), k, v );
+	result = rbtree_insert_node( t, *n, &((*n)->right), k, v,
+				     overwrite );
     }
   }
-  else return RBTREE_ERROR;
+  else result = RBTREE_ERROR;
+  return result;
 }
 
 static void rbtree_insert_post( rbtree *t, rbtree_node *n ) {
@@ -993,10 +1036,11 @@ int rbtree_insert( rbtree *t, void *key, void *val ) {
       if ( t->copy_val && t->free_val ) v = t->copy_val( val );
       else v = val;
       if ( ( val && v ) || ( !val && !v ) ) {
-	result = rbtree_insert_node( t, NULL, &(t->root), k, v );
+	result = rbtree_insert_node( t, NULL, &(t->root), k, v, 1 );
 	if ( result != RBTREE_SUCCESS ) {
 	  if ( k != key && t->free_key ) t->free_key( k );
 	  if ( v != val && t->free_val ) t->free_val( v );
+	  status = result;
 	}
       }
       else {

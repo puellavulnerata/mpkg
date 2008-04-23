@@ -27,6 +27,20 @@ int delete_from_pkg_db( pkg_db *db, char *key ) {
   return status;
 }
 
+int enumerate_pkg_db( pkg_db *db, void *n_in,
+		      char **k_out, char **v_out,
+		      void **n_out ) {
+  if ( db && k_out && v_out && n_out )
+    return db->enumerate( db->private, n_in,
+			  k_out, v_out, n_out );
+  else return -1;
+}
+
+unsigned long get_entry_count_for_pkg_db( pkg_db *db ) {
+  if ( db ) return db->entry_count( db->private );
+  else return 0;
+}
+
 int insert_into_pkg_db( pkg_db *db, char *key, char *value ) {
   int status, result;
 
