@@ -6,6 +6,13 @@
 
 #include <pkg.h>
 
+#define SIZEOF_STR( str ) ( strlen( str) + 1 ) * sizeof( char );
+
+static int close_bdb( void * );
+static int delete_from_bdb( void *, char * );
+static char * query_bdb( void *, char * );
+static int insert_into_bdb( void *, char *, char * );
+
 pkg_db * open_pkg_db_bdb( char *filename ) {
   pkg_db *ret = malloc( sizeof ( pkg_db ) );
   DB *bdb;
