@@ -25,6 +25,7 @@ char * query_pkg_db( pkg_db *, char * );
 pkg_db * create_pkg_db_text_file( char * );
 pkg_db * open_pkg_db_text_file( char * );
 
+pkg_db * create_pkg_db_bdb( char * );
 pkg_db * open_pkg_db_bdb( char * );
 
 #endif
