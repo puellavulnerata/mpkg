@@ -17,8 +17,7 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
   pkg_db *ret = malloc( sizeof ( pkg_db ) );
   DB *bdb;
 
-  if( ret == NULL ) 
-    perror( "" );
+  if ( ret == NULL ) return NULL;
 
   ret->query = query_bdb;
   ret->insert = insert_into_bdb;
@@ -74,6 +73,7 @@ char * query_bdb( void *db, char *key ) {
   bdb->get( bdb, NULL, &bdb_key, &bdb_value, 0 );
 
   ret = malloc( ( bdb_value.size + 1 ) * sizeof( char ) );
+  if ( !ret ) return NULL;
   strcpy( ret, bdb_value.data );
   
   return ret;
