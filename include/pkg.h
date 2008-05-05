@@ -3,6 +3,7 @@
 
 #include <pkgdb.h>
 #include <pkgdescr.h>
+#include <pkgpath.h>
 #include <pkgutil.h>
 #include <rbtree.h>
 
