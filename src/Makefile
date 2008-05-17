@@ -3,8 +3,8 @@ include ../config.mk
 INCLUDE_FLAGS=-I../include
 LIBS=
 
-OBJS=pkg.o pkgdb.o pkgdb_bdb.o pkgdb_text_file.o pkgdescr.o pkgpath.o \
-	pkgutil.o rbtree.o
+OBJS=compression_none.o compression.o pkg.o pkgdb.o pkgdb_bdb.o \
+	pkgdb_text_file.o pkgdescr.o pkgpath.o pkgutil.o rbtree.o
 
 .PHONY: all clean
 
