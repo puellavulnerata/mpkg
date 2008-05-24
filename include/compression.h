@@ -28,4 +28,9 @@ long write_to_stream( write_stream *, void *, long );
 read_stream * open_read_stream_none( char * );
 write_stream * open_write_stream_none( char * );
 
+#ifdef COMPRESSION_GZIP
+read_stream * open_read_stream_gzip( char * );
+write_stream * open_write_stream_gzip( char * );
+#endif
+
 #endif
