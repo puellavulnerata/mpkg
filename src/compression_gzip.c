@@ -67,7 +67,8 @@ static void close_gzip_write( void *vp ) {
 	  }
 	}
 	def_status = deflate( &(p->strm), Z_FINISH );
-	if ( def_status != Z_OK ) {
+	if ( !( def_status == Z_OK ||
+		def_status == Z_STREAM_END ) ) {
 	  p->error = 1;
 	  break;
 	}
