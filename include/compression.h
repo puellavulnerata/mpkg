@@ -31,6 +31,8 @@ write_stream * open_write_stream_none( char * );
 #ifdef COMPRESSION_GZIP
 read_stream * open_read_stream_gzip( char * );
 write_stream * open_write_stream_gzip( char * );
+read_stream * open_read_stream_from_stream_gzip( read_stream * );
+write_stream * open_write_stream_from_stream_gzip( write_stream * );
 #endif
 
 #endif
