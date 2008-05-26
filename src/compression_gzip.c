@@ -61,7 +61,7 @@ static void close_gzip_write( void *vp ) {
 	    p->strm.avail_out = CHUNK_SIZE;
 	  }
 	  else {
-	    // We couldn't write all the output we had
+	    /* We couldn't write all the output we had */
 	    p->error = 1;
 	    break;
 	  }
@@ -394,7 +394,7 @@ static long write_gzip( void *vp, void *buf, long len ) {
 	    p->strm.avail_out = CHUNK_SIZE;
 	  }
 	  else {
-	    // We couldn't write all the output we had
+	    /* We couldn't write all the output we had */
 	    status = COMP_INTERNAL_ERROR;
 	    p->error = 1;
 	    break;
