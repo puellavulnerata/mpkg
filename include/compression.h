@@ -33,6 +33,13 @@ read_stream * open_read_stream_gzip( char * );
 write_stream * open_write_stream_gzip( char * );
 read_stream * open_read_stream_from_stream_gzip( read_stream * );
 write_stream * open_write_stream_from_stream_gzip( write_stream * );
-#endif
+#endif /* COMPRESSION_GZIP */
+
+#ifdef COMPRESSION_BZIP2
+read_stream * open_read_stream_bzip2( char * );
+write_stream * open_write_stream_bzip2( char * );
+read_stream * open_read_stream_from_stream_bzip2( read_stream * );
+write_stream * open_write_stream_from_stream_bzip2( write_stream * );
+#endif /* COMPRESSION_BZIP2 */
 
 #endif
