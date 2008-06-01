@@ -4,9 +4,9 @@ INCLUDE_FLAGS=-I../include
 LIBS=
 
 OBJS=\
-	compression_bzip2.o compression_gzip.o compression_none.o \
-	compression.o pkg.o pkgdb.o pkgdb_bdb.o pkgdb_text_file.o pkgdescr.o \
-	pkgpath.o pkgutil.o rbtree.o
+	pkg.o pkgdb.o pkgdb_bdb.o pkgdb_text_file.o pkgdescr.o pkgpath.o \
+	pkgutil.o rbtree.o streams_bzip2.o streams_gzip.o streams_none.o \
+	streams.o
 
 .PHONY: all clean
 
