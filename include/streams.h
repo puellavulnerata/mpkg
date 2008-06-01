@@ -1,10 +1,10 @@
-#ifndef __COMPRESSION_H__
-#define __COMPRESSION_H__
+#ifndef __STREAMS_H__
+#define __STREAMS_H__
 
-#define COMP_EOF 0
-#define COMP_BAD_STREAM -1
-#define COMP_BAD_ARGS -2
-#define COMP_INTERNAL_ERROR -3
+#define STREAMS_EOF 0
+#define STREAMS_BAD_STREAM -1
+#define STREAMS_BAD_ARGS -2
+#define STREAMS_INTERNAL_ERROR -3
 
 typedef struct {
   void *private;

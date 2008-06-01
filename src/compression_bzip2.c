@@ -335,14 +335,14 @@ static long read_bzip2( void *vp, void *buf, long len ) {
 	    if ( result > 0 ) p->strm.avail_in = result;
 	    else if ( result == 0 ) break; /* EOF */
 	    else {
-	      status = COMP_INTERNAL_ERROR;
+	      status = STREAMS_INTERNAL_ERROR;
 	    }
 	  }
 	  else {
 	    result = fread( p->buf, 1, CHUNK_SIZE, p->u.fp );
 	    if ( result > 0 ) p->strm.avail_in = result;
 	    else {
-	      if ( ferror( p->u.fp ) ) status = COMP_INTERNAL_ERROR;
+	      if ( ferror( p->u.fp ) ) status = STREAMS_INTERNAL_ERROR;
 	      break;
 	    }
 	  }
@@ -351,16 +351,16 @@ static long read_bzip2( void *vp, void *buf, long len ) {
 	if ( inf_status == BZ_STREAM_END ) break;
 	else if ( inf_status != BZ_OK ) {
 	  p->error = 1;
-	  status = COMP_INTERNAL_ERROR;
+	  status = STREAMS_INTERNAL_ERROR;
 	  break;
 	}
       }
       if ( status >= 0 ) status = len - p->strm.avail_out;
       return status;
     }
-    else return COMP_INTERNAL_ERROR;
+    else return STREAMS_INTERNAL_ERROR;
   }
-  else return COMP_BAD_ARGS;
+  else return STREAMS_BAD_ARGS;
 }
 
 static long write_bzip2( void *vp, void *buf, long len ) {
@@ -387,7 +387,7 @@ static long write_bzip2( void *vp, void *buf, long len ) {
 	  }
 	  else {
 	    /* We couldn't write all the output we had */
-	    status = COMP_INTERNAL_ERROR;
+	    status = STREAMS_INTERNAL_ERROR;
 	    p->error = 1;
 	    break;
 	  }
@@ -396,16 +396,16 @@ static long write_bzip2( void *vp, void *buf, long len ) {
 	def_status = BZ2_bzCompress( &(p->strm), BZ_RUN );
 	if ( def_status != BZ_RUN_OK ) {
 	  p->error = 1;
-	  status = COMP_INTERNAL_ERROR;
+	  status = STREAMS_INTERNAL_ERROR;
 	  break;
 	}
       }
       if ( status >= 0 ) status = len - p->strm.avail_in;
       return status;
     }
-    else return COMP_INTERNAL_ERROR;
+    else return STREAMS_INTERNAL_ERROR;
   }
-  else return COMP_BAD_ARGS;
+  else return STREAMS_BAD_ARGS;
 }
 
 #endif /* COMPRESSION_BZIP2 */

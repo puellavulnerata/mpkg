@@ -17,11 +17,11 @@ void close_write_stream( write_stream *w ) {
 long read_from_stream( read_stream *r, void *buf, long len ) {
   if ( r )
     return r->read( r->private, buf, len );
-  else return COMP_BAD_STREAM;
+  else return STREAMS_BAD_STREAM;
 }
 
 long write_to_stream( write_stream *w, void *buf, long len ) {
   if ( w )
     return w->write( w->private, buf, len );
-  else return COMP_BAD_STREAM;
+  else return STREAMS_BAD_STREAM;
 }

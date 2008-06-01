@@ -61,15 +61,15 @@ static long read_none( void *p, void *buf, long len ) {
   fp = (FILE *)p;
   if ( fp && buf && len > 0 ) {
     result = fread( buf, 1, len, fp );
-    if ( result < 0 ) return COMP_INTERNAL_ERROR;
+    if ( result < 0 ) return STREAMS_INTERNAL_ERROR;
     else if ( result < len ) {
       if ( result > 0 ) return result;
-      else if ( feof( fp ) ) return COMP_EOF;
-      else return COMP_INTERNAL_ERROR;
+      else if ( feof( fp ) ) return STREAMS_EOF;
+      else return STREAMS_INTERNAL_ERROR;
     }
     else return result;
   }
-  else return COMP_BAD_ARGS;
+  else return STREAMS_BAD_ARGS;
 }
 
 static long write_none( void *p, void *buf, long len ) {
@@ -79,13 +79,13 @@ static long write_none( void *p, void *buf, long len ) {
   fp = (FILE *)p;
   if ( fp && buf && len > 0 ) {
     result = fwrite( buf, 1, len, fp );
-    if ( result < 0 ) return COMP_INTERNAL_ERROR;
+    if ( result < 0 ) return STREAMS_INTERNAL_ERROR;
     else if ( result < len ) {
       if ( result > 0 ) return result;
-      else if ( feof( fp ) ) return COMP_EOF;
-      else return COMP_INTERNAL_ERROR;
+      else if ( feof( fp ) ) return STREAMS_EOF;
+      else return STREAMS_INTERNAL_ERROR;
     }
     else return result;
   }
-  else return COMP_BAD_ARGS;
+  else return STREAMS_BAD_ARGS;
 }
