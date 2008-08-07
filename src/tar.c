@@ -1,4 +1,14 @@
+#include <stdlib.h>
+#include <string.h>
+
+#include <errno.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <pkg.h>
+
+static int emit_tar_header( write_stream *, tar_file_info *,
+			    unsigned long long );
 
 static int is_all_zero( void * );
 static int is_file_header( void * );
@@ -18,7 +28,9 @@ static void prepare_for_file_read( tar_reader *, void * );
 static int read_tar_block( tar_reader *, void * );
 
 static void tar_close_read_stream( void * );
+static void tar_close_write_stream( void * );
 static long tar_read_from_stream( void *, void *, long );
+static long tar_write_to_stream( void *, void *, long );
 
 void close_tar_reader( tar_reader *tr ) {
   if ( tr ) {
@@ -30,6 +42,158 @@ void close_tar_reader( tar_reader *tr ) {
     }
     free( tr );
   }
+}
+
+void close_tar_writer( tar_writer *tw ) {
+  unsigned char buf[TAR_BLOCK_SIZE];
+
+  if ( tw ) {
+    if ( tw->state == TAR_READY ) {
+      memset( buf, 0, TAR_BLOCK_SIZE );
+      /* Terminate with two all-zero blocks */
+      write_to_stream( tw->ws, buf, TAR_BLOCK_SIZE );
+      write_to_stream( tw->ws, buf, TAR_BLOCK_SIZE );
+    }
+    else if ( tw->state == TAR_IN_FILE ) {
+      /*
+       * Don't do this, it will produce bad files, but let's at least
+       * avoid leaking.
+       */
+
+      if ( tw->u.in_file.tmp >= 0 ) {
+	close( tw->u.in_file.tmp );
+	if ( tw->u.in_file.tmp_name ) unlink( tw->u.in_file.tmp_name );
+	tw->u.in_file.tmp = -1;
+      }
+      if ( tw->u.in_file.tmp_name ) {
+	free( tw->u.in_file.tmp_name );
+	tw->u.in_file.tmp_name = NULL;
+      }
+    }
+    free( tw );
+  }
+}
+
+static int emit_tar_header( write_stream *ws, tar_file_info *info,
+			    unsigned long long size ) {
+  unsigned char buf[TAR_BLOCK_SIZE], link_ind, tmp[13];
+  int filename_len, target_len, i;
+  unsigned char *ustar_sig = "ustar00";
+  unsigned int checksum;
+
+  if ( ws && info ) {
+    /* Clear out the buffer */
+    memset( buf, 0, TAR_BLOCK_SIZE );
+
+    /* Set the USTAR indicator */
+    memcpy( buf + TAR_USTAR_SIG_OFFSET, ustar_sig, strlen( ustar_sig ) + 1 );
+
+    /* Set the Link Indicator byte */
+    switch ( info->type ) {
+    case TAR_FILE:
+      link_ind = 0;
+      break;
+    case TAR_LINK:
+      link_ind = '1';
+      break;
+    case TAR_SYMLINK:
+      link_ind = '2';
+      break;
+    case TAR_CDEV:
+      link_ind = '3';
+      break;
+    case TAR_BDEV:
+      link_ind = '4';
+      break;
+    case TAR_DIR:
+      link_ind = '5';
+      break;
+    case TAR_FIFO:
+      link_ind = '6';
+      break;
+    case TAR_CONTIG_FILE:
+      link_ind = '7';
+      break;
+    default:
+      /* File by default */
+      link_ind = 0;
+      break;
+    }
+    buf[TAR_LINK_IND_OFFSET] = link_ind;
+
+    /* Emit the filename */
+    filename_len = strlen( info->filename );
+    if ( filename_len <= TAR_FILENAME_LEN ) {
+      memcpy( buf + TAR_FILENAME_OFFSET, info->filename, filename_len );
+    }
+    else if ( filename_len <= TAR_FILENAME_LEN + TAR_PREFIX_LEN ) {
+      memcpy( buf + TAR_PREFIX_OFFSET, info->filename,
+	      filename_len - TAR_FILENAME_LEN );
+      memcpy( buf + TAR_FILENAME_OFFSET,
+	      info->filename + ( filename_len - TAR_FILENAME_LEN ),
+	      TAR_FILENAME_LEN );
+    }
+    else return TAR_INTERNAL_ERROR;
+
+    /* Emit the target if necessary */
+    if ( info->type == TAR_LINK || info->type == TAR_SYMLINK ) {
+      target_len = strlen( info->target );
+      if ( target_len <= TAR_TARGET_LEN )
+	memcpy( buf + TAR_TARGET_OFFSET, info->target, target_len );
+      else return TAR_INTERNAL_ERROR;
+    }
+
+    /* Emit the owner */
+    memset( tmp, 0, 8 );
+    snprintf( tmp, 8, "%07o", info->owner );
+    memcpy( buf + TAR_OWNER_OFFSET, tmp, 8 );
+
+    /* Emit the group */
+    memset( tmp, 0, 8 );
+    snprintf( tmp, 8, "%07o", info->group );
+    memcpy( buf + TAR_GROUP_OFFSET, tmp, 8 );
+
+    /* Emit the mode */
+    memset( tmp, 0, 8 );
+    snprintf( tmp, 8, "%07o", info->mode );
+    memcpy( buf + TAR_MODE_OFFSET, tmp, 8 );
+
+    /* Emit the mtime */
+    memset( tmp, 0, 12 );
+    snprintf( tmp, 12, "%011o", info->mtime );
+    memcpy( buf + TAR_MTIME_OFFSET, tmp, 12 );
+
+    /* Emit the size - max 8G */
+    if ( size < 8589934592LL ) {
+      memset( tmp, 0, 12 );
+      snprintf( tmp, 12, "%011Lo", size );
+      memcpy( buf + TAR_SIZE_OFFSET, tmp, 12 );
+    }
+    else return TAR_INTERNAL_ERROR;
+
+    /* Calculate the checksum */
+    checksum = 0;
+    for ( i = 0; i < TAR_CHECKSUM_OFFSET; ++i )
+      checksum += buf[i];
+    /*
+     * The 8 bytes of checksum count as ASCII spaces (32) for toward the
+     * checksum
+     */
+    checksum += 8 * ' ';
+    for ( i = TAR_LINK_IND_OFFSET; i < TAR_BLOCK_SIZE; ++i )
+      checksum += buf[i];
+
+    /* Write the checksum to the block */
+    memset( tmp, 0, 8 );
+    snprintf( tmp, 8, "%07o", checksum );
+    memcpy( buf + TAR_CHECKSUM_OFFSET, tmp, 8 );
+
+    /* Write this block to the stream */
+    if ( write_to_stream( ws, buf, TAR_BLOCK_SIZE ) == TAR_BLOCK_SIZE )
+      return TAR_SUCCESS;
+    else return TAR_IO_ERROR;
+  }
+  else return TAR_BAD_PARAMS;
 }
 
 int get_next_file( tar_reader *tr ) {
@@ -192,31 +356,31 @@ static void prepare_for_file_read( tar_reader *tr, void *buf ) {
       switch ( bufc[TAR_LINK_IND_OFFSET] ) {
       case 0:
       case '0':
-	tr->u.in_file.type = TAR_FILE;
+	tr->u.in_file.f->type = TAR_FILE;
 	break;
       case '1':
-	tr->u.in_file.type = TAR_LINK;
+	tr->u.in_file.f->type = TAR_LINK;
 	break;
       case '2':
-	tr->u.in_file.type = TAR_SYMLINK;
+	tr->u.in_file.f->type = TAR_SYMLINK;
 	break;
       case '3':
-	tr->u.in_file.type = TAR_CDEV;
+	tr->u.in_file.f->type = TAR_CDEV;
 	break;
       case '4':
-	tr->u.in_file.type = TAR_BDEV;
+	tr->u.in_file.f->type = TAR_BDEV;
 	break;
       case '5':
-	tr->u.in_file.type = TAR_DIR;
+	tr->u.in_file.f->type = TAR_DIR;
 	break;
       case '6':
-	tr->u.in_file.type = TAR_FIFO;
+	tr->u.in_file.f->type = TAR_FIFO;
 	break;
       case '7':
-	tr->u.in_file.type = TAR_CONTIG_FILE;
+	tr->u.in_file.f->type = TAR_CONTIG_FILE;
 	break;
       default:
-	tr->u.in_file.type = TAR_FILE;
+	tr->u.in_file.f->type = TAR_FILE;
 	break;
       }
 
@@ -351,6 +515,50 @@ static void prepare_for_file_read( tar_reader *tr, void *buf ) {
   }
 }
 
+write_stream * put_next_file( tar_writer *tw, tar_file_info *info ) {
+  write_stream *ws;
+  int tmp;
+  char tmpl[] = "/tmp/pkgtarXXXXXX";
+  char *tmp_name;
+
+  if ( tw && info ) {
+    if ( tw->state == TAR_READY ) {
+      tw->u.in_file.f = info;
+      tw->u.in_file.bytes_seen = 0;
+      ws = malloc( sizeof( *ws ) );
+      if ( ws ) {
+	ws->private = tw;
+	ws->close = tar_close_write_stream;
+	ws->write = tar_write_to_stream;
+	tmp_name = malloc( sizeof( *tmp_name ) * ( strlen( tmpl ) + 1 ) );
+	if ( tmp_name ) {
+	  tmp = mkstemp( tmpl );
+	  if ( tmp >= 0 ) {
+	    strcpy( tmp_name, tmpl );
+	    tw->u.in_file.tmp = tmp;
+	    tw->u.in_file.tmp_name = tmp_name;
+	    tw->state = TAR_IN_FILE;
+	    ++(tw->files_out);
+	    return ws;
+	  }
+	  else {
+	    free( tmp_name );
+	    free( ws );
+	    return NULL;
+	  }
+	}
+	else {
+	  free( ws );
+	  return NULL;
+	}
+      }
+      else return NULL;
+    }
+    else return NULL;
+  }
+  else return NULL;
+}
+
 static int read_tar_block( tar_reader *tr, void *buf ) {
   int status, result;
   long len, read;
@@ -389,8 +597,86 @@ tar_reader *start_tar_reader( read_stream *rs ) {
   else return NULL;
 }
 
+tar_writer * start_tar_writer( write_stream *ws ) {
+  tar_writer *tw;
+
+  if ( ws ) {
+    tw = malloc( sizeof( *tw ) );
+    if ( tw ) {
+      tw->files_out = 0;
+      tw->blocks_out = 0;
+      tw->state = TAR_READY;
+      tw->u.in_file.f = NULL;
+      tw->u.in_file.tmp_name = NULL;
+      tw->u.in_file.tmp = -1;
+      tw->u.in_file.bytes_seen = 0;
+      tw->ws = ws;
+      return tw;
+    }
+    else return NULL;
+  }
+  else return NULL;
+}
+
 static void tar_close_read_stream( void *v ) {
   if ( v ) free( v );
+}
+
+static void tar_close_write_stream( void *v ) {
+  tar_writer *tw;
+  int status;
+  off_t o;
+  unsigned char buf[TAR_BLOCK_SIZE];
+  unsigned long long so_far, this_time;
+  unsigned int block_so_far;
+  size_t r;
+
+  tw = (tar_writer *)v;
+  if ( tw ) {
+    if ( tw->state == TAR_IN_FILE && tw->u.in_file.tmp >= 0 ) {
+      status = emit_tar_header( tw->ws, tw->u.in_file.f,
+				tw->u.in_file.bytes_seen );
+      if ( status == TAR_SUCCESS ) {
+	++(tw->blocks_out);
+	o = lseek( tw->u.in_file.tmp, 0, SEEK_SET );
+	if ( o == 0 ) {
+	  so_far = 0;
+	  while ( so_far < tw->u.in_file.bytes_seen ) {
+	    this_time = tw->u.in_file.bytes_seen - so_far;
+	    if ( this_time > TAR_BLOCK_SIZE ) this_time = TAR_BLOCK_SIZE;
+
+	    block_so_far = 0;
+	    while ( block_so_far < this_time ) {
+	      r = read( tw->u.in_file.tmp, buf + block_so_far,
+			(size_t)( this_time - block_so_far ) );
+	      if ( r > 0 ) block_so_far += r;
+	      else break;
+	    }
+
+	    if ( block_so_far == this_time ) {
+	      if ( this_time < TAR_BLOCK_SIZE )
+		memset( buf + this_time, 0, TAR_BLOCK_SIZE - this_time );
+
+	      r = write_to_stream( tw->ws, buf, TAR_BLOCK_SIZE );
+	      if ( r != TAR_BLOCK_SIZE ) break;
+
+	      ++(tw->blocks_out);
+	      so_far += this_time;
+	    }
+	    else break;
+	  }
+	}
+	close( tw->u.in_file.tmp );
+	tw->u.in_file.tmp = -1;
+	if ( tw->u.in_file.tmp_name ) {
+	  unlink( tw->u.in_file.tmp_name );
+	  free( tw->u.in_file.tmp_name );
+	  tw->u.in_file.tmp_name = NULL;
+	}
+	tw->state = TAR_READY;
+      }
+    }
+  }
 }
 
 static long tar_read_from_stream( void *v, void *buf, long size ) {
@@ -440,6 +726,33 @@ static long tar_read_from_stream( void *v, void *buf, long size ) {
 	  else return STREAMS_EOF;
 	}
 	else return STREAMS_EOF;
+      }
+      else return STREAMS_BAD_STREAM;
+    }
+    else return STREAMS_BAD_STREAM;
+  }
+  else return STREAMS_BAD_ARGS;
+}
+
+static long tar_write_to_stream( void *v, void *buf, long size ) {
+  tar_writer *tw;
+  ssize_t written, total;
+
+  if ( v && buf && size > 0 ) {
+    tw = (tar_writer *)v;
+    if ( tw->state == TAR_IN_FILE ) {
+      if ( tw->u.in_file.tmp >= 0 ) {
+	total = 0;
+	while ( total < size ) {
+	  written = write( tw->u.in_file.tmp, buf + total, size - total );
+	  if ( written >= 0 ) {
+	    total += written;
+	    tw->u.in_file.bytes_seen += written;
+	  }
+	  else break;
+	}
+	if ( total > 0 ) return total;
+	else return STREAMS_INTERNAL_ERROR;
       }
       else return STREAMS_BAD_STREAM;
     }

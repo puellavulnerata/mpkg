@@ -12,15 +12,6 @@
 
 #define TAR_BLOCK_SIZE 512
 
-#define TAR_FILE 0
-#define TAR_LINK 1
-#define TAR_SYMLINK 2
-#define TAR_CDEV 3
-#define TAR_BDEV 4
-#define TAR_DIR 5
-#define TAR_FIFO 6
-#define TAR_CONTIG_FILE 7
-
 #define TAR_FILENAME_OFFSET 0
 #define TAR_MODE_OFFSET 100
 #define TAR_OWNER_OFFSET 108
@@ -42,8 +33,26 @@
 #define TAR_TARGET_LEN 100
 #define TAR_PREFIX_LEN 155
 
+typedef enum {
+    TAR_READY,
+    TAR_IN_FILE,
+    TAR_DONE
+} tar_state;
+
+typedef enum {
+  TAR_FILE,
+  TAR_LINK,
+  TAR_SYMLINK,
+  TAR_CDEV,
+  TAR_BDEV,
+  TAR_DIR,
+  TAR_FIFO,
+  TAR_CONTIG_FILE
+} tar_type;
+
 typedef struct {
   /* Possibly including USTAR prefix */
+  tar_type type;
   char filename[TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1];
   char target[TAR_TARGET_LEN + 1];
   uid_t owner;
@@ -56,15 +65,10 @@ typedef struct {
   unsigned long files_seen; /* Including the current one, if any */
   unsigned long long blocks_seen;
   unsigned long zero_blocks_seen;
-  enum {
-    TAR_READY,
-    TAR_IN_FILE,
-    TAR_DONE
-  } state;
+  tar_state state;
   union {
     struct {
       tar_file_info *f;
-      char type;
       char curr_block[TAR_BLOCK_SIZE];
       unsigned long long bytes_seen;
       unsigned long long blocks_seen;
@@ -79,9 +83,27 @@ typedef struct {
   tar_reader *tr;
 } tar_read_stream;
 
+typedef struct {
+  unsigned long files_out; /* Including the current one, if any */
+  unsigned long long blocks_out;
+  tar_state state;
+  union {
+    struct {
+      tar_file_info *f;
+      char *tmp_name;
+      int tmp;
+      unsigned long long bytes_seen;
+    } in_file;
+  } u;
+  write_stream *ws;
+} tar_writer;
+
 void close_tar_reader( tar_reader * );
+void close_tar_writer( tar_writer * );
 int get_next_file( tar_reader * );
 read_stream * get_reader_for_file( tar_reader * );
-tar_reader *start_tar_reader( read_stream * );
+write_stream * put_next_file( tar_writer *, tar_file_info * );
+tar_reader * start_tar_reader( read_stream * );
+tar_writer * start_tar_writer( write_stream * );
 
 #endif /* __TAR_H__ */
