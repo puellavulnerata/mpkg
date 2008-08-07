@@ -6,7 +6,7 @@ LIBS=
 OBJS=\
 	pkg.o pkgdb.o pkgdb_bdb.o pkgdb_text_file.o pkgdescr.o pkgpath.o \
 	pkgutil.o rbtree.o streams_bzip2.o streams_gzip.o streams_none.o \
-	streams.o
+	streams.o tar.o
 
 .PHONY: all clean
 

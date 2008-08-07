@@ -7,5 +7,6 @@
 #include <pkgutil.h>
 #include <rbtree.h>
 #include <streams.h>
+#include <tar.h>
 
 #endif
