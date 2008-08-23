@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <errno.h>
+#include <unistd.h>
+
 #include <pkg.h>
 
 static char hex_digit_to_char( unsigned char );
@@ -316,6 +322,50 @@ char * read_line_from_file( FILE *fp ) {
     return line;
   }
   else return NULL;
+}
+
+int recrm( const char *path ) {
+  int status, result, len;
+  struct stat st;
+  DIR *d;
+  struct dirent *de;
+  char *s;
+
+  result = 0;
+  status = lstat( path, &st );
+  if ( status == 0 ) {
+    if ( S_ISDIR( st.st_mode ) ) {
+      d = opendir( path );
+      if ( d ) {
+	len = strlen( path ) + NAME_MAX + 1;
+	s = malloc( sizeof( *s ) * ( len + 1 ) );
+	if ( s ) {
+	  while ( de = readdir( d ) ) {
+	    if ( strcmp( de->d_name, "." ) != 0 &&
+		 strcmp( de->d_name, ".." ) != 0 ) {
+	      snprintf( s, len, "%s/%s", path, de->d_name );
+	      status = recrm( s );
+	      if ( status != 0 && result == 0 ) result = status;
+	    }
+	  }
+	  free( s );
+	}
+	else result = ENOMEM;
+	status = closedir( d );
+	if ( status != 0 ) result = errno;
+      }
+      else result = errno;
+      status = rmdir( path );
+      if ( status != 0 && result == 0 ) result = errno;
+    }
+    else {
+      status = unlink( path );
+      if ( status != 0 ) result = errno;
+    }
+  }
+  else result = errno;
+
+  return result;
 }
 
 int strlistlen( char **list ) {
