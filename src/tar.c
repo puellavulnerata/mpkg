@@ -196,6 +196,14 @@ static int emit_tar_header( write_stream *ws, tar_file_info *info,
   else return TAR_BAD_PARAMS;
 }
 
+tar_file_info * get_file_info( tar_reader *tr ) {
+  if ( tr ) {
+    if ( tr->state == TAR_IN_FILE ) return tr->u.in_file.f;
+    else return NULL;
+  }
+  else return NULL;
+}
+
 int get_next_file( tar_reader *tr ) {
   char buf[TAR_BLOCK_SIZE];
   int status, result;

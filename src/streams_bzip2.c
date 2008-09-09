@@ -144,7 +144,7 @@ read_stream * open_read_stream_from_stream_bzip2( read_stream *rs ) {
   return r;
 }
 
-read_stream * open_read_stream_bzip2( char *filename ) {
+read_stream * open_read_stream_bzip2( const char *filename ) {
   read_stream *r;
   bzip2_private *p;
   int status;
@@ -254,7 +254,7 @@ write_stream * open_write_stream_from_stream_bzip2( write_stream *ws ) {
   else w = NULL;
   return w;
 }
-write_stream * open_write_stream_bzip2( char *filename ) {
+write_stream * open_write_stream_bzip2( const char *filename ) {
   write_stream *w;
   bzip2_private *p;
   int status;

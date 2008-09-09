@@ -6,17 +6,17 @@ LIBS=
 OBJS=\
 	md5.o pkg.o pkgdb.o pkgdb_bdb.o pkgdb_text_file.o pkgdescr.o \
 	pkgpath.o pkgutil.o rbtree.o streams_bzip2.o streams_gzip.o \
-	streams_none.o streams.o tar.o
+	streams_none.o streams.o tar.o unpack.o
 
 .PHONY: all clean
 
-all: pkg
+all: mpkg
 
 $(OBJS): %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $< $(INCLUDE_FLAGS)
 
-pkg: $(OBJS)
+mpkg: $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
 clean:
-	rm -f pkg $(OBJS)
+	rm -f mpkg $(OBJS)

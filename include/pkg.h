@@ -9,5 +9,6 @@
 #include <rbtree.h>
 #include <streams.h>
 #include <tar.h>
+#include <unpack.h>
 
 #endif

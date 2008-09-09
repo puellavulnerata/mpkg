@@ -100,6 +100,7 @@ typedef struct {
 
 void close_tar_reader( tar_reader * );
 void close_tar_writer( tar_writer * );
+tar_file_info * get_file_info( tar_reader * );
 int get_next_file( tar_reader * );
 read_stream * get_reader_for_file( tar_reader * );
 write_stream * put_next_file( tar_writer *, tar_file_info * );

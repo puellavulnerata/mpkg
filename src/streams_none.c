@@ -13,7 +13,7 @@ static void close_none( void *p ) {
   if ( fp ) fclose( fp );
 }
 
-read_stream * open_read_stream_none( char *filename ) {
+read_stream * open_read_stream_none( const char *filename ) {
   read_stream *r;
   FILE *fp;
 
@@ -33,7 +33,7 @@ read_stream * open_read_stream_none( char *filename ) {
   return r;
 }
 
-write_stream * open_write_stream_none( char *filename ) {
+write_stream * open_write_stream_none( const char *filename ) {
   write_stream *w;
   FILE *fp;
 

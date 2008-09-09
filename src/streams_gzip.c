@@ -143,7 +143,7 @@ read_stream * open_read_stream_from_stream_gzip( read_stream *rs ) {
   return r;
 }
 
-read_stream * open_read_stream_gzip( char *filename ) {
+read_stream * open_read_stream_gzip( const char *filename ) {
   read_stream *r;
   gzip_private *p;
   int status;
@@ -257,7 +257,7 @@ write_stream * open_write_stream_from_stream_gzip( write_stream *ws ) {
   return w;
 }
 
-write_stream * open_write_stream_gzip( char *filename ) {
+write_stream * open_write_stream_gzip( const char *filename ) {
   write_stream *w;
   gzip_private *p;
   int status;
