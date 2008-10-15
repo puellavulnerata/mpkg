@@ -247,6 +247,7 @@ int get_next_file( tar_reader *tr ) {
 	      tr->zero_blocks_seen = 0;
 	      ++(tr->files_seen);
 	      tr->state = TAR_IN_FILE;
+	      result = TAR_SUCCESS;
 	    }
 	    else if ( is_all_zero( buf ) ) {
 	      ++(tr->zero_blocks_seen);
