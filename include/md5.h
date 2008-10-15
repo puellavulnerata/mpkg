@@ -10,6 +10,7 @@
  */
 
 #define MD5_BLOCK_LEN 64
+#define MD5_RESULT_LEN 16
 
 typedef struct {
   enum {

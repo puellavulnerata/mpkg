@@ -1,3 +1,6 @@
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
 #include <unistd.h>
 
 #include <pkg.h>
@@ -12,10 +15,10 @@ static int check_cksums( pkg_handle_builder * );
 static void * cksum_copier( void * );
 static void cksum_free( void * );
 static void cleanup_pkg_handle_builder( pkg_handle_builder * );
-static int handle_descr( pkg_handle_builder *, tar_file_info *,
-			 read_stream * );
+static int handle_descr( pkg_handle_builder *, read_stream * );
 static int handle_file( pkg_handle_builder *, tar_file_info *,
 			read_stream * );
+static int setup_dirs_for_unpack( char *, char * );
 
 #ifdef PKGFMT_V1
 static pkg_handle * open_pkg_file_v1( const char * );
@@ -35,9 +38,12 @@ static pkg_handle * open_pkg_file_v2( const char * );
 
 static pkg_handle_builder * alloc_pkg_handle_builder( void ) {
   pkg_handle_builder *b;
+  int status;
+  char *tmp;
 
   b = malloc( sizeof( *b ) );
   if ( b ) {
+    b->p = NULL;
     b->cksums = rbtree_alloc( rbtree_string_comparator,
 			      rbtree_string_copier,
 			      rbtree_string_free,
@@ -49,26 +55,102 @@ static pkg_handle_builder * alloc_pkg_handle_builder( void ) {
 	b->p->descr = NULL;
 	b->p->descr_file = NULL;
 	b->p->unpacked_dir = get_temp_dir();
-	if ( !(b->p->unpacked_dir) ) {
-	  rbtree_free( b->cksums );
-	  free( b->p );
-	  free( b );
-	  b = NULL;
-	}
+	if ( b->p->unpacked_dir ) {
+	  tmp = concatenate_paths( b->p->unpacked_dir, "package-content" );
+	  if ( tmp ) {
+	    status = mkdir( tmp, 0700 );
+	    free( tmp );
+	    if ( status != 0 ) goto error;
+	  }
+	  else goto error;	}
+	else goto error;
       }
-      else {
-	rbtree_free( b->cksums );
-	free( b );
-	b = NULL;
-      }
+      else goto error;
     }
-    else {
-      free( b );
-      b = NULL;
-    }
+    else goto error;
   }
 
   return b;
+
+error:
+  if ( b ) {
+    if ( b->p ) {
+      if ( b->p->unpacked_dir ) {
+	recrm( b->p->unpacked_dir );
+	free( b->p->unpacked_dir );
+      }
+      if ( b->cksums ) rbtree_free( b->cksums );
+      free( b->p );
+    }
+    free( b );
+  }
+
+  return NULL;
+}
+
+static int check_cksums( pkg_handle_builder *b ) {
+  int result, i, status;
+  uint8_t *descr_cksum, *actual_cksum;
+
+  result = 0;
+  if ( b ) {
+    if ( b->p && b->cksums ) {
+      if ( b->p->descr ) {
+	for ( i = 0; i < b->p->descr->num_entries; ++i ) {
+	  if ( b->p->descr->entries[i].type == ENTRY_FILE ) {
+	    descr_cksum = b->p->descr->entries[i].u.f.hash;
+	    status = rbtree_query( b->cksums,
+				   b->p->descr->entries[i].filename,
+				   (void **)(&actual_cksum) );
+	    if ( status == RBTREE_SUCCESS ) {
+	      if ( memcmp( descr_cksum, actual_cksum, MD5_RESULT_LEN ) != 0 ) {
+		fprintf( stderr, "Checksums do not match for %s\n",
+			 b->p->descr->entries[i].filename );
+		result = -4;
+	      }
+	      rbtree_delete( b->cksums,
+			     b->p->descr->entries[i].filename,
+			     NULL );
+	    }
+	    else if ( status == RBTREE_NOT_FOUND ) {
+	      fprintf( stderr, "File %s from package-description not found\n",
+		       b->p->descr->entries[i].filename );
+	      result = -4;
+	    }
+	    else {
+	      fprintf( stderr, "Red/black tree error during checksum for %s\n",
+		       b->p->descr->entries[i].filename );
+	      result = -4;
+	    }
+	  }
+	  else if ( b->p->descr->entries[i].type == ENTRY_LAST ) break;
+	}
+      }
+      else result = -3;
+    }
+    else result = -2;
+  }
+  else result = -1;
+
+  return result;
+}
+
+
+static void * cksum_copier( void *v ) {
+  uint8_t *cksum, *copy;
+
+  copy = NULL;
+  if ( v ) {
+    cksum = (uint8_t *)v;
+    copy = malloc( sizeof( *copy ) * MD5_RESULT_LEN );
+    if ( copy ) memcpy( copy, cksum, sizeof( *cksum ) * MD5_RESULT_LEN );
+  }
+
+  return copy;
+}
+
+static void cksum_free( void *v ) {
+  if ( v ) free( v );
 }
 
 static void cleanup_pkg_handle_builder( pkg_handle_builder *b ) {
@@ -97,6 +179,140 @@ void close_pkg( pkg_handle *h ) {
     }
     free( h );
   }
+}
+
+#define UNPACK_BUF_LEN 1024
+
+static int handle_descr( pkg_handle_builder *b, read_stream *rs ) {
+  int result, error;
+  unsigned char buf[UNPACK_BUF_LEN];
+  char *dst;
+  write_stream *ws;
+  long len, wlen;
+  pkg_descr *descr;
+
+  result = 0;
+  if ( b && rs ) {
+    dst = concatenate_paths( b->p->unpacked_dir, "package-description" );
+    if ( dst ) {
+      ws = open_write_stream_none( dst );
+      if ( ws ) {
+	error = 0;
+	while ( ( len = read_from_stream( rs, buf, UNPACK_BUF_LEN ) ) > 0 ) {
+	  wlen = write_to_stream( ws, buf, len );
+	  if ( wlen != len ) {
+	    error = 1;
+	    break;
+	  }
+	}
+	if ( len < 0 || error ) {
+	  /* Error reading or writing it */
+	  result = -4;
+	}
+
+	close_write_stream( ws );
+      }
+      else result = -3;
+
+      if ( result == 0 ) {
+	descr = read_pkg_descr_from_file( dst );
+	if ( !descr ) result == -4;
+      }
+
+      if ( result == 0 ) {
+	b->p->descr_file = dst;
+	b->p->descr = descr;
+      }
+      else free( dst );
+    }
+    else result = -2;
+  }
+  else result = -1;
+
+  return result;
+}
+
+static int handle_file( pkg_handle_builder *b, tar_file_info *tinf,
+			read_stream *rs ) {
+  int result, error, status;
+  char *dst, *tmp;
+  write_stream *ws, *md5_ws;
+  md5_state *md5;
+  unsigned char buf[UNPACK_BUF_LEN];
+  long len, wlen;
+  uint8_t cksum[MD5_RESULT_LEN];
+
+  result = 0;
+  if ( b && tinf && rs ) {
+    if ( tinf->type == TAR_FILE ) {
+      md5 = start_new_md5();
+      if ( md5 ) {
+	md5_ws = get_md5_ws( md5 );
+	tmp = concatenate_paths( b->p->unpacked_dir, "package-content" );
+	if ( tmp ) {
+	  dst = concatenate_paths( tmp, tinf->filename );
+	  free( tmp );
+	  if ( dst ) {
+	    status = setup_dirs_for_unpack( b->p->unpacked_dir, dst );
+	    if ( status == 0 ) {
+	      ws = open_write_stream_none( dst );
+	      free( dst );
+	      if ( ws ) {
+		error = 0;
+		while ( ( len =
+			  read_from_stream( rs, buf, UNPACK_BUF_LEN ) ) > 0 ) {
+		  wlen = write_to_stream( md5_ws, buf, len );
+		  if ( wlen != len ) {
+		    error = 1;
+		    break;
+		  }
+		  wlen = write_to_stream( ws, buf, len );
+		  if ( wlen != len ) {
+		    error = 1;
+		    break;
+		  }
+		}
+		if ( len == 0 && !error ) {
+		  close_write_stream( ws );
+		  close_write_stream( md5_ws );
+		  status = get_md5_result( md5, cksum );
+		  if ( status == 0 ) {
+		    tmp = concatenate_paths( "/", tinf->filename );
+		    if ( tmp ) {
+		      status = rbtree_insert_no_overwrite( b->cksums,
+							   tmp, cksum );
+		      free( tmp );
+		      if ( status != RBTREE_SUCCESS ) result = -11;
+		    }
+		    else result = -10;
+		  }
+		  else result = -9;
+		}
+		else {
+		  /* Error reading or writing */
+
+		  close_write_stream( ws );
+		  close_write_stream( md5_ws );
+		  result = -8;
+		}
+	      }
+	      else result = -7;
+	    }
+	    else result = -6;
+	  }
+	  else result = -5;
+	}
+	else result = -4;
+
+	close_md5( md5 );
+      }
+      else result = -3;
+    }
+    else result = -2;
+  }
+  else result = -1;
+
+  return result;
 }
 
 pkg_handle * open_pkg_file( const char *filename ) {
@@ -337,13 +553,13 @@ static pkg_handle * open_pkg_file_v1_stream( read_stream *rs ) {
       if ( b ) {
 	b->p->version = PKG_VER_1;
 	error = 0;
-	while ( get_next_file( tr ) == TAR_SUCCESS ) {
+	while ( ( status = get_next_file( tr ) ) == TAR_SUCCESS ) {
 	  tinf = get_file_info( tr );
 	  if ( tinf->type == TAR_FILE ) {
 	    trs = get_reader_for_file( tr );
 	    if ( trs ) {
 	      if ( strcmp( tinf->filename, "package-description" ) == 0 )
-		status = handle_descr( b, tinf, trs );
+		status = handle_descr( b, trs );
 	      else status = handle_file( b, tinf, trs );
 	      if ( status != 0 ) {
 		error = 1;
@@ -357,8 +573,11 @@ static pkg_handle * open_pkg_file_v1_stream( read_stream *rs ) {
 	    }
 	  }
 	}
-	status = check_cksums( b );
-	if ( status != 0 ) error = 1;
+	if ( status != TAR_NO_MORE_FILES ) error = 1;
+	else {
+	  status = check_cksums( b );
+	  if ( status != 0 ) error = 1;
+	}
 	if ( !error ) p = b->p;
 	else close_pkg( b->p );
 	cleanup_pkg_handle_builder( b );
@@ -380,3 +599,95 @@ static pkg_handle * open_pkg_file_v2( const char *filename ) {
 
 #endif
 
+static int setup_dirs_for_unpack( char *base, char *dst ) {
+  int blen, dlen, result, slashes, status, i, j;
+  char *temp;
+  struct stat statbuf;
+
+  result = 0;
+  if ( base && dst ) {
+    blen = strlen( base );
+    dlen = strlen( dst );
+    if ( blen > 0 && dlen > 0 && dlen > blen ) {
+      temp = malloc( sizeof( *temp ) * ( dlen + 1 ) );
+      if ( temp ) {
+	strcpy( temp, dst );
+
+	/*
+	 * Check that base is a prefix of dst
+	 */
+
+	for ( i = 0; i < blen; ++i ) {
+	  if ( temp[i] != base[i] ) {
+	    result = -4;
+	    break;
+	  }
+	}
+
+	if ( result == 0 ) {
+	  slashes = 0;
+	  /*
+	   * Count a terminating slash in base
+	   */
+	  if ( base[blen-1] == '/' ) ++slashes;
+	  i = blen;
+	  while ( temp[i++] == '/' ) ++slashes;
+	  if ( slashes > 0 ) {
+	    while ( i < dlen && result == 0 ) {
+	      j = i;
+	      while ( temp[j] != 0 && temp[j] != '/' ) ++j;
+	      if ( j > i ) {
+		if ( temp[j] == '/' ) {
+		  /* We found a directory element from i to j */
+		  temp[j] = 0;
+		  status = lstat( temp, &statbuf );
+		  if ( status == 0 ) {
+		    if ( !( S_ISDIR( statbuf.st_mode ) ) ) {
+		      /* Already exists and isn't a directory! */
+		      result = -7;
+		    }
+		  }
+		  else {
+		    if ( errno == ENOENT ) {
+		      /* It doesn't exist yet, create it */
+		      status = mkdir( temp, 0700 );
+		      if ( status != 0 ) result = -8;
+		    }
+		    else {
+		      /* Other error from lstat() */
+		      result = -9;
+		    }
+		  }
+		  temp[j] = '/';
+		}
+		else {
+		  /*
+		   * We found the end of the string, the filename is
+		   * from i to j
+		   */
+
+		  break;
+		}
+		while ( temp[j] == '/' ) ++j;
+		i = j;
+	      }
+	      else result = -6; /* No empty elements or terminating slashes */
+	    }
+
+	    /*
+	     * All directories should be created at this point
+	     */
+	  }
+	  else result = -5; /* base must end on a directory boundary */
+	}
+
+	free( temp );
+      }
+      else result = -3;
+    }
+    else result = -2;
+  }
+  else result = -1;
+
+  return result;
+}

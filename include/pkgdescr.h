@@ -4,7 +4,9 @@
 #include <sys/types.h>
 #include <time.h>
 
-#define HASH_LEN 16
+#include <md5.h>
+
+#define HASH_LEN MD5_RESULT_LEN
 
 typedef struct {
   char *pkg_name;
@@ -23,7 +25,7 @@ typedef struct {
   union {
     struct {
       mode_t mode;
-      unsigned char hash[HASH_LEN];
+      uint8_t hash[HASH_LEN];
     } f;
     struct {
       mode_t mode;

@@ -39,6 +39,34 @@ void dbg_printf( char const *file, int line, char const *fmt, ... ) {
   fprintf( stderr, "\n" );
 }
 
+char * get_temp_dir( void ) {
+  const char *basedir;
+  char *template;
+  char *temp_dir, *tmp;
+
+  temp_dir = NULL;
+  basedir = get_temp();
+  if ( basedir ) {
+    template = malloc( sizeof( *template ) * ( strlen( basedir ) + 64 ) );
+    if ( template ) {
+      strcpy( template, basedir );
+      sprintf( template, "%s/mpkg.%d.XXXXXX", basedir, getpid() );
+      if ( canonicalize_path( template ) == 0 ) {
+	temp_dir = mkdtemp( template );
+	if ( temp_dir ) {
+	  tmp = realloc( temp_dir,
+			 sizeof( *tmp ) * ( strlen( temp_dir ) + 1 ) );
+	  if ( tmp ) temp_dir = tmp;
+	}
+	else free( template );
+      }
+      else free( template );
+    }
+  }
+
+  return temp_dir;
+}
+
 char * hash_to_string( unsigned char *hash, unsigned long len ) {
   char *str_temp;
   unsigned long i;

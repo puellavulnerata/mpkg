@@ -6,16 +6,20 @@
 int main( int, char **, char ** );
 
 int main( int argc, char **argv, char **envp ) {
-  int status;
+  pkg_handle *p;
 
+  init_pkg_globals();
   if ( argc == 2 ) {
-    status = recrm( argv[1] );
-    if ( status != 0 ) {
-      fprintf( stderr, "%s\n", strerror( status ) );
+    printf( "Trying to open \"%s\".\n", argv[1] );
+    p = open_pkg_file( argv[1] );
+    if ( p ) {
+      printf( "Got it, in \"%s\".\n", p->unpacked_dir );
+      close_pkg( p );
     }
+    else printf( "Failed\n" );
   }
   else {
-    fprintf( stderr, "Must have 1 arg\n" );
+    fprintf( stderr, "Need 2 args\n" );
   }
 
   return 0;

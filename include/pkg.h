@@ -4,6 +4,7 @@
 #include <md5.h>
 #include <pkgdb.h>
 #include <pkgdescr.h>
+#include <pkgglobal.h>
 #include <pkgpath.h>
 #include <pkgutil.h>
 #include <rbtree.h>
