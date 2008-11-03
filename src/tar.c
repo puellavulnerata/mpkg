@@ -243,10 +243,10 @@ int get_next_file( tar_reader *tr ) {
 	  status = read_tar_block( tr, buf );
 	  if ( status == TAR_SUCCESS ) {
 	    if ( is_file_header( buf ) ) {
+	      tr->state = TAR_IN_FILE;
 	      prepare_for_file_read( tr, buf );
 	      tr->zero_blocks_seen = 0;
 	      ++(tr->files_seen);
-	      tr->state = TAR_IN_FILE;
 	      result = TAR_SUCCESS;
 	    }
 	    else if ( is_all_zero( buf ) ) {
@@ -357,9 +357,8 @@ static void prepare_for_file_read( tar_reader *tr, void *buf ) {
   char tmp[13];
   int pref_chars, count;
 
-  if ( tr && buf && tr->state == TAR_READY ) {
+  if ( tr && buf && tr->state == TAR_IN_FILE ) {
     bufc = (unsigned char *)buf;
-    if ( tr->u.in_file.f ) free( tr->u.in_file.f );
     tr->u.in_file.f = malloc( sizeof( *(tr->u.in_file.f) ) );
     if ( tr->u.in_file.f ) {
       switch ( bufc[TAR_LINK_IND_OFFSET] ) {
@@ -414,6 +413,7 @@ static void prepare_for_file_read( tar_reader *tr, void *buf ) {
 	if ( bufc[TAR_FILENAME_OFFSET + count] != 0 ) ++count;
 	else break;
       }
+
       if ( count > 0 )
 	memcpy( tr->u.in_file.f->filename + pref_chars,
 		bufc + TAR_FILENAME_OFFSET,
@@ -589,7 +589,7 @@ static int read_tar_block( tar_reader *tr, void *buf ) {
   return result;
 }
 
-tar_reader *start_tar_reader( read_stream *rs ) {
+tar_reader * start_tar_reader( read_stream *rs ) {
   tar_reader *tr;
 
   if ( rs ) {
