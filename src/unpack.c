@@ -33,7 +33,9 @@ static pkg_handle * open_pkg_file_v1_stream( read_stream * );
 #endif
 
 #ifdef PKGFMT_V2
+static int handle_content_v2( pkg_handle_builder *, read_stream * );
 static pkg_handle * open_pkg_file_v2( const char * );
+static pkg_handle * open_pkg_file_v2_stream( read_stream * );
 #endif
 
 static pkg_handle_builder * alloc_pkg_handle_builder( void ) {
@@ -180,6 +182,55 @@ void close_pkg( pkg_handle *h ) {
     free( h );
   }
 }
+
+#ifdef PKGFMT_V2
+
+static int handle_content_v2( pkg_handle_builder *b, read_stream *rs ) {
+  int error, status, result;
+  tar_reader *tr;
+  tar_file_info *tinf;
+  read_stream *trs;
+
+  status = 0;
+  if ( b && rs ) {
+    tr = start_tar_reader( rs );
+    if ( tr ) {
+      error = 0;
+      while ( ( result = get_next_file( tr ) ) == TAR_SUCCESS ) {
+	tinf = get_file_info( tr );
+	if ( tinf->type == TAR_FILE ) {
+	  trs = get_reader_for_file( tr );
+	  if ( trs ) {
+	    status = handle_file( b, tinf, trs );
+	    if ( status != 0 ) {
+	      error = 1;
+	      break;
+	    }
+	    close_read_stream( trs );
+	  }
+	  else {
+	    error = 1;
+	    break;
+	  }	
+	}
+	/* Else skip non-files */
+      }
+
+      if ( error == 0 && result != TAR_NO_MORE_FILES ) error = 1;
+
+      if ( error != 0 ) status = -3;
+      else status = 0;
+
+      close_tar_reader( tr );
+    }
+    else status = -2;
+  }
+  else status = -1;
+
+  return status;
+}
+
+#endif
 
 #define UNPACK_BUF_LEN 1024
 
@@ -594,7 +645,131 @@ static pkg_handle * open_pkg_file_v1_stream( read_stream *rs ) {
 #ifdef PKGFMT_V2
 
 static pkg_handle * open_pkg_file_v2( const char *filename ) {
-  return NULL;
+  read_stream *rs;
+  pkg_handle *p;
+
+  p = NULL;
+  if ( filename ) {
+    rs = open_read_stream_none( filename );
+    if ( rs ) {
+      p = open_pkg_file_v2_stream( rs );
+      close_read_stream( rs );
+    }
+  }
+
+  return p;
+}
+
+static pkg_handle * open_pkg_file_v2_stream( read_stream *rs ) {
+  pkg_handle *p;
+  tar_reader *tr;
+  read_stream *trs, *decomped_trs;
+  tar_file_info *tinf;
+  int error, status, got_descr, got_content;
+  pkg_handle_builder *b;
+
+  p = NULL;
+  got_descr = 0;
+  got_content = 0;
+  decomped_trs = NULL;
+  if ( rs ) {
+    tr = start_tar_reader( rs );
+    if ( tr ) {
+      b = alloc_pkg_handle_builder();
+      if ( b ) {
+	b->p->version = PKG_VER_2;
+	error = 0;
+	while ( ( status = get_next_file( tr ) ) == TAR_SUCCESS ) {
+	  tinf = get_file_info( tr );
+	  if ( tinf->type == TAR_FILE ) {
+	    trs = get_reader_for_file( tr );
+	    if ( trs ) {
+	      if ( strcmp( tinf->filename, "package-description" ) == 0 ) {
+		if ( !got_descr ) {
+		  status = handle_descr( b, trs );
+		  if ( status == 0 ) got_descr = 1;
+		}
+		/* Duplicate package-description */
+		else status = -1;
+	      }
+	      else if ( strcmp( tinf->filename, "package-content.tar" ) == 0 ) {
+		if ( !got_content ) {
+		  status = handle_content_v2( b, trs );
+		  if ( status == 0 ) got_content = 1;
+		}
+		/* Duplicate package-content */
+		else status = -1;
+	      }
+#ifdef COMPRESSION_GZIP
+	      else if ( strcmp( tinf->filename, "package-content.tar.gz" ) == 0 ) {
+		if ( !got_content ) {
+		  decomped_trs = open_read_stream_from_stream_gzip( trs );
+		  if ( decomped_trs ) {
+		    status = handle_content_v2( b, decomped_trs );
+		    if ( status == 0 ) got_content = 1;
+		    close_read_stream( decomped_trs );
+		    decomped_trs = NULL;
+		  }
+		}
+		/* Duplicate package-content */
+		else status = -1;
+	      }	      
+#endif
+#ifdef COMPRESSION_BZIP2
+	      else if ( strcmp( tinf->filename, "package-content.tar.bz2" ) == 0 ) {
+		if ( !got_content ) {
+		  decomped_trs = open_read_stream_from_stream_bzip2( trs );
+		  if ( decomped_trs ) {
+		    status = handle_content_v2( b, decomped_trs );
+		    if ( status == 0 ) got_content = 1;
+		    close_read_stream( decomped_trs );
+		    decomped_trs = NULL;
+		  }
+		}
+		/* Duplicate package-content */
+		else status = -1;
+	      }
+#endif
+	      /* 
+	       * else {
+	       *     Skip any filenames we don't recognize so they can be
+	       *     used in future versions
+	       * }
+	       */
+
+	      close_read_stream( trs );
+
+	      if ( status != 0 ) {
+		error = 1;
+		break;
+	      }
+	    }
+	    else {
+	      error = 1;
+	      break;
+	    }
+	  }
+	}
+
+	if ( got_content && got_descr ) {
+	  if ( status != TAR_NO_MORE_FILES ) error = 1;
+	  else {
+	    status = check_cksums( b );
+	    if ( status != 0 ) error = 1;
+	  }
+	}
+	else error = 1;
+
+	if ( !error ) p = b->p;
+	else close_pkg( b->p );
+
+	cleanup_pkg_handle_builder( b );
+      }
+      close_tar_reader( tr );
+    }  
+  }
+
+  return p;
 }
 
 #endif
