@@ -1,26 +1,113 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <pkg.h>
 
+static void help_callback( int, char ** );
 int main( int, char **, char ** );
+static void test_callback( int, char ** );
+
+struct cmd_s {
+  char *name;
+  void (*callback)( int, char ** );
+} cmd_table[] = {
+  { "help", help_callback },
+  { "test", test_callback },
+  { NULL, NULL }
+};
+
+static void help_callback( int argc, char **argv ) {
+  if ( argc == 1 ) {
+    printf( "help %s\n", argv[0] );
+  }
+  else printf( "help\n" );
+}
 
 int main( int argc, char **argv, char **envp ) {
-  pkg_handle *p;
+  int i, error;
+  char *cmd, *curr;
+  int cmd_argc;
+  char **cmd_argv;
 
   init_pkg_globals();
-  if ( argc == 2 ) {
-    printf( "Trying to open \"%s\".\n", argv[1] );
-    p = open_pkg_file( argv[1] );
-    if ( p ) {
-      printf( "Got it, in \"%s\".\n", p->unpacked_dir );
-      close_pkg( p );
+
+  i = 1;
+  cmd = NULL;
+  error = 0;
+
+  while ( i < argc ) {
+    curr = argv[i];
+
+    if ( *curr == '-' ) {
+      if ( strcmp( curr, "--tempdir" ) == 0 ) {
+	if ( i + 1 < argc ) set_temp( argv[++i] );
+	else {
+	  fprintf( stderr, "--tempdir requires a directory name\n" );
+	  error = 1;
+	  break;
+	}
+      }
+      else if ( strcmp( curr, "--pkgdir" ) == 0 ) {
+	if ( i + 1 < argc ) set_pkg( argv[++i] );
+	else {
+	  fprintf( stderr, "--pkgdir requires a directory name\n" );
+	  error = 2;
+	  break;
+	}
+      }
+      else if ( strcmp( curr, "--instroot" ) == 0 ) {
+	if ( i + 1 < argc ) set_root( argv[++i] );
+	else {
+	  fprintf( stderr, "--instroot requires a directory name\n" );
+	  error = 3;
+	  break;
+	}
+      }
+      else {
+	fprintf( stderr, "Unknown option %s\n", curr );
+	error = 4;
+	break;
+      }
     }
-    else printf( "Failed\n" );
-  }
-  else {
-    fprintf( stderr, "Need 2 args\n" );
+    else {
+      cmd = curr;
+      cmd_argc = argc - i - 1;
+      if ( cmd_argc > 0 ) cmd_argv = argv + i + 1;
+      else cmd_argv = NULL;
+      break;
+    }
+
+    ++i;
   }
 
+  if ( error == 0 ) {
+    if ( cmd ) {
+      i = 0;
+
+      error = 5;
+      while ( cmd_table[i].name != NULL ) {
+	if ( strcmp( cmd, cmd_table[i].name ) == 0 ) {
+	  cmd_table[i].callback( cmd_argc, cmd_argv );
+	  error = 0;
+	  break;
+	}
+	++i;
+      }
+
+      if ( error != 0 ) {
+	fprintf( stderr, "Unknown command %s.  Try 'mpkg help'.\n",
+		 cmd );
+      }
+    }
+    else fprintf( stderr, "A command is required.  Try 'mpkg help'.\n" );
+  }
+
+  free_pkg_globals();
+
   return 0;
+}
+
+static void test_callback( int argc, char **argv ) {
+  printf( "test\n" );
 }

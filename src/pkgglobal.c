@@ -1,9 +1,70 @@
 #include <pkg.h>
 
-static char *temp;
+static char *pkg = NULL;
+static char *root = NULL;
+static char *temp = NULL;
+
+void free_pkg_globals( void ) {
+  if ( pkg && pkg != DEFAULT_PKG_STRING ) {
+    free( pkg );
+    pkg = NULL;
+  }
+  if ( root && root != DEFAULT_ROOT_STRING ) {
+    free( root );
+    root = NULL;
+  }
+  if ( temp && temp != DEFAULT_TEMP_STRING ) {
+    free( temp );
+    temp = NULL;
+  }
+}
 
 void init_pkg_globals( void ) {
+  pkg = DEFAULT_PKG_STRING;
+  root = DEFAULT_ROOT_STRING;
   temp = DEFAULT_TEMP_STRING;
+}
+
+const char * get_pkg( void ) {
+  return pkg;
+}
+
+void set_pkg( const char *pkg_in ) {
+  if ( pkg_in ) {
+    if ( pkg && pkg != DEFAULT_PKG_STRING ) free( pkg );
+    pkg = malloc( sizeof( *pkg ) * ( strlen( pkg_in ) + 1 ) );
+    if ( pkg ) {
+      strcpy( pkg, pkg_in );
+    }
+    else {
+      fprintf( stderr,
+	       "Warning: malloc() error while setting pkgdir to \"%s\".\n",
+	       pkg_in );
+      pkg = DEFAULT_PKG_STRING;
+    }
+  }
+  else pkg = DEFAULT_PKG_STRING;
+}
+
+const char * get_root( void ) {
+  return root;
+}
+
+void set_root( const char *root_in ) {
+  if ( root_in ) {
+    if ( root && root != DEFAULT_ROOT_STRING ) free( root );
+    root = malloc( sizeof( *root ) * ( strlen( root_in ) + 1 ) );
+    if ( root ) {
+      strcpy( root, root_in );
+    }
+    else {
+      fprintf( stderr,
+	       "Warning: malloc() error while setting installroot to \"%s\".\n",
+	       root_in );
+      root = DEFAULT_ROOT_STRING;
+    }
+  }
+  else root = DEFAULT_ROOT_STRING;
 }
 
 const char * get_temp( void ) {
@@ -12,6 +73,7 @@ const char * get_temp( void ) {
 
 void set_temp( const char *temp_in ) {
   if ( temp_in ) {
+    if ( temp && temp != DEFAULT_TEMP_STRING ) free( temp );
     temp = malloc( sizeof( *temp ) * ( strlen( temp_in ) + 1 ) );
     if ( temp ) {
       strcpy( temp, temp_in );
