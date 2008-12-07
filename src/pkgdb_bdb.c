@@ -31,7 +31,7 @@ pkg_db * create_pkg_db_bdb( char *filename ) {
 
   if( ( result = db_create( &bdb, NULL, 0 ) ) != 0 )
   {
-    // Might want to use DB->err, but it's simpler to fprintf.
+    /* Might want to use DB->err, but it's simpler to fprintf. */
     fprintf( stderr, "bdb db_create failed (%d)\n", result );
     free( ret );
     return NULL;
@@ -42,6 +42,7 @@ pkg_db * create_pkg_db_bdb( char *filename ) {
     NULL, DB_BTREE, DB_CREATE | DB_EXCL, 0 ) ) != 0 )
   {
     fprintf( stderr, "bdb database create failed (%d)\n", result );
+    bdb->close( bdb, 0 );
     free( ret );
     return NULL;
   }
@@ -66,8 +67,8 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
 
   if( ( result = db_create( &bdb, NULL, 0 ) ) != 0 )
   {
-    // Might want to use DB->err, but it's simpler to fprintf.
-    fprintf( stderr, "bdb db_create failed (%d)\n", result );
+    /* Might want to use DB->err, but it's simpler to fprintf.*/
+    /* fprintf( stderr, "bdb db_create failed (%d)\n", result ); */
     free( ret );
     return NULL;
   }
@@ -76,7 +77,8 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
   if( ( result = bdb->open( bdb, NULL, filename, 
     NULL, DB_BTREE, 0, 0 ) ) != 0)
   {
-    fprintf( stderr, "bdb database open failed\n" );
+    /* fprintf( stderr, "bdb database open failed\n" ); */
+    bdb->close( bdb, 0 );
     free( ret );
     return NULL;
   }
@@ -88,7 +90,7 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
 static int close_bdb( void *db ) {
   int ret;
   DB *bdb = (DB *)db;
-  ret = bdb->close( bdb, 0 ); // frees db->private too
+  ret = bdb->close( bdb, 0 ); /* frees db->private too */
   return ret;
 }
 
