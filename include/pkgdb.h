@@ -16,6 +16,7 @@ int delete_from_pkg_db( pkg_db *, char * );
 int enumerate_pkg_db( pkg_db *, void *, char **, char **, void ** );
 unsigned long get_entry_count_for_pkg_db( pkg_db * );
 int insert_into_pkg_db( pkg_db *, char *, char * );
+pkg_db * open_pkg_db( void );
 char * query_pkg_db( pkg_db *, char * );
 
 /*
@@ -25,7 +26,11 @@ char * query_pkg_db( pkg_db *, char * );
 pkg_db * create_pkg_db_text_file( char * );
 pkg_db * open_pkg_db_text_file( char * );
 
+#ifdef DB_BDB
+
 pkg_db * create_pkg_db_bdb( char * );
 pkg_db * open_pkg_db_bdb( char * );
 
-#endif
+#endif /* DB_BDB */
+
+#endif /* __PKG_DB_H__ */
