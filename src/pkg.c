@@ -14,6 +14,7 @@ struct cmd_s {
 } cmd_table[] = {
   { "help", help_callback },
   { "test", test_callback },
+  { "install", install_main },
   { NULL, NULL }
 };
 

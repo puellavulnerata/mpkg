@@ -1,6 +1,7 @@
 #ifndef __PKG_H__
 #define __PKG_H__
 
+#include <install.h>
 #include <md5.h>
 #include <pkgdb.h>
 #include <pkgdescr.h>
