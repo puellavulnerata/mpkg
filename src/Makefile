@@ -4,10 +4,21 @@ INCLUDE_FLAGS=-I../include
 LIBS=
 
 OBJS=\
-	install.o md5.o pkg.o pkgdb.o pkgdb_bdb.o pkgdb_text_file.o \
-	pkgdescr.o pkgglobal.o pkgpath.o pkgutil.o rbtree.o \
-	streams_bzip2.o streams_gzip.o streams_none.o streams.o \
+	install.o md5.o pkg.o pkgdb.o pkgdb_text_file.o pkgdescr.o \
+	pkgglobal.o pkgpath.o pkgutil.o rbtree.o streams_none.o streams.o \
 	tar.o unpack.o
+
+ifdef CONFIG_BDB
+	OBJS+=pkgdb_bdb.o
+endif
+
+ifdef CONFIG_BZIP2
+	OBJS+=streams_bzip2.o
+endif
+
+ifdef CONFIG_GZIP
+	OBJS+=streams_gzip.o
+endif
 
 .PHONY: all clean
 
