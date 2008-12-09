@@ -13,7 +13,13 @@
 
 static char hex_digit_to_char( unsigned char );
 
-char * copy_string( char *s ) {
+/*
+ * char * copy_string( const char *s );
+ *
+ * Copy a string into a newly-allocated block of memory.
+ */
+
+char * copy_string( const char *s ) {
   int len;
   char *t;
 
@@ -29,6 +35,12 @@ char * copy_string( char *s ) {
   else return NULL;
 }
 
+/*
+ * dbg_printf()
+ *
+ * Called by the debug macros when enabled
+ */
+
 void dbg_printf( char const *file, int line, char const *fmt, ... ) {
   va_list s;
 
@@ -38,6 +50,12 @@ void dbg_printf( char const *file, int line, char const *fmt, ... ) {
   va_end( s );
   fprintf( stderr, "\n" );
 }
+
+/*
+ * char * get_temp_dir( void );
+ *
+ * Create a temporary directory
+ */
 
 char * get_temp_dir( void ) {
   const char *basedir;
@@ -67,6 +85,12 @@ char * get_temp_dir( void ) {
   return temp_dir;
 }
 
+/*
+ * char * hash_to_string( unsigned char *hash, unsigned long len );
+ *
+ * Convert an MD5 hash to a printable string
+ */
+
 char * hash_to_string( unsigned char *hash, unsigned long len ) {
   char *str_temp;
   unsigned long i;
@@ -85,6 +109,12 @@ char * hash_to_string( unsigned char *hash, unsigned long len ) {
   }
   else return NULL;
 }
+
+/*
+ * char hex_digit_to_char( unsigned char );
+ *
+ * Convert a hex digit to a printable character
+ */
 
 static char hex_digit_to_char( unsigned char x ) {
   switch ( x ) {
@@ -141,6 +171,12 @@ static char hex_digit_to_char( unsigned char x ) {
   }
 }
 
+/*
+ * int is_whitespace( char *str );
+ *
+ * Return 1 if str is all whitespace
+ */
+
 int is_whitespace( char *str ) {
   char c;
 
@@ -152,6 +188,15 @@ int is_whitespace( char *str ) {
   }
   else return -1;
 }
+
+/*
+ * int parse_strings_from_line( char *line, char ***strings_out );
+ *
+ * Find non-whitespace substrings of line; put NUL characters in line
+ * to terminate them, and allocate a block of memory to hold a
+ * NULL-terminated array of pointers into line at the start of each
+ * substring.  Pass this array to the caller in strings_out.
+ */
 
 #define INITIAL_STRINGS_ALLOC 4
 
@@ -267,6 +312,12 @@ int parse_strings_from_line( char *line, char ***strings_out ) {
   else return -1;
 }
 
+/*
+ * char * read_line_from_file( FILE *fp );
+ *
+ * Read one line from a file into a newly allocated block of memory.
+ */
+
 #define INITIAL_LINE_ALLOC 16
 
 char * read_line_from_file( FILE *fp ) {
@@ -352,6 +403,12 @@ char * read_line_from_file( FILE *fp ) {
   else return NULL;
 }
 
+/*
+ * int recrm( const char *path );
+ *
+ * Recursively unlink a directory tree
+ */
+
 int recrm( const char *path ) {
   int status, result, len;
   struct stat st;
@@ -395,6 +452,53 @@ int recrm( const char *path ) {
 
   return result;
 }
+
+/*
+ * int rename_to_temp( const char *name );
+ *
+ * Rename the file name to a temporary.
+ */
+
+char * rename_to_temp( const char *name ) {
+  char *temp;
+  int len, status;
+
+  temp = NULL;
+  if ( name ) {
+    len = strlen( name );
+    len += 32; /* + 5 for .old. plus 10 for pid plus null, plus margin */
+    temp = malloc( sizeof( *temp ) * len );
+    if ( temp ) {
+      snprintf( temp, len, "%s.old.%d", name, getpid() );
+      status = link( name, temp );
+      if ( status == 0 ) {
+	status = unlink( name );
+	if ( status != 0 ) {
+	  fprintf( stderr, "Couldn't rename %s to %s: %s\n",
+		   name, temp, strerror( errno ) );
+	  unlink( temp );
+	  free( temp );
+	  temp = NULL;
+	}
+	/* else succeed and return temp */
+      }
+      else {
+	fprintf( stderr, "Couldn't rename %s to %s: %s\n",
+		 name, temp, strerror( errno ) );
+	free( temp );
+	temp = NULL;
+      }
+    }
+  }
+
+  return temp;
+}
+
+/*
+ * int strlistlen( char **list );
+ *
+ * Return the length of a null-terminated list of strings
+ */
 
 int strlistlen( char **list ) {
   int len;
