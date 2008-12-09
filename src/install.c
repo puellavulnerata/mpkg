@@ -22,6 +22,7 @@ static install_state * alloc_install_state( void );
 static int do_install_descr( pkg_db *, pkg_handle *, install_state * );
 static void free_install_state( install_state * );
 static int install_pkg( pkg_db *, pkg_handle * );
+static int rollback_install_descr( pkg_db *, pkg_handle *, install_state * );
 
 static install_state * alloc_install_state( void ) {
   install_state *is;
@@ -260,13 +261,54 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
     if ( is ) {
       /* Pass one */
       status = do_install_descr( db, p, is );
-      /* TODO */
+      if ( status != INSTALL_SUCCESS ) goto err_install_descr;
+      /* TODO - Passes two through eight */
+      goto success;
+
+    err_install_descr:
+      rollback_install_descr( db, p, is );
+
+    success:
       free_install_state( is );
     }
     else {
       fprintf( stderr,
 	       "Unable to allocate memory installing %s\n",
 	       p->descr->hdr.pkg_name );
+      status = INSTALL_ERROR;
+    }
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int rollback_install_descr( pkg_db *db, pkg_handle *p, install_state *is ) {
+  int status, result;
+  char *pkg_name;
+
+  status = INSTALL_SUCCESS;
+  if ( db && p && is ) {
+    result = chdir( get_pkg() );
+    if ( result == 0 ) {
+      pkg_name = p->descr->hdr.pkg_name;
+      unlink( pkg_name );
+      if ( is->old_descr ) {
+	/*
+	 * Don't bother checking for errors, since this is rollback
+	 * and we can't do anything about them anyway
+	 */
+
+	link( is->old_descr, pkg_name );
+	unlink( is->old_descr );
+	free( is->old_descr );
+	is->old_descr = NULL;
+      }
+    }
+    else {
+      fprintf( stderr,
+	       "Couldn't chdir to package directory %s!\n",
+	       get_pkg() );
       status = INSTALL_ERROR;
     }
   }
