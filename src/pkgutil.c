@@ -51,6 +51,99 @@ void dbg_printf( char const *file, int line, char const *fmt, ... ) {
   fprintf( stderr, "\n" );
 }
 
+#define INITIAL_DIR_ALLOC 16
+
+char * get_current_dir( void ) {
+  int alloced, len;
+  char *cwd, *temp;
+
+  alloced = INITIAL_DIR_ALLOC;
+  cwd = NULL;
+  while ( !cwd ) {
+    cwd = malloc( sizeof( *cwd ) * alloced );
+    if ( !(getcwd( cwd, alloced ) ) ) {
+      free( cwd );
+      cwd = NULL;
+      alloced *= 2;
+    }
+  }
+  len = strlen( cwd );
+  temp = realloc( cwd, sizeof( *cwd ) * ( len + 1 ) );
+  if ( temp ) cwd = temp;
+  else {
+    free( cwd );
+    cwd = NULL;
+  }
+
+  return cwd;
+}
+
+char * get_path_component( char *p, char **tmp ) {
+  enum {
+    START,
+    IN_NAME,
+    IN_SLASH
+  } parse_state;
+  char *curr, *start;
+
+  if ( tmp ) {
+    if ( p ) {
+      *tmp = p;
+      curr = p;
+      parse_state = START;
+    }
+    else {
+      if ( *tmp ) {
+	curr = *tmp;
+	*curr = '/';
+	parse_state = IN_SLASH;
+      }
+      else return NULL;
+    }
+    
+    while ( *curr ) {
+      switch ( parse_state ) {
+      case START:
+	if ( *curr == '/' ) {
+	  parse_state = IN_SLASH;
+	}
+	else {
+	  parse_state = IN_NAME;
+	  start = curr;
+	}
+	break;
+      case IN_SLASH:
+	if ( *curr != '/' ) {
+	  parse_state = IN_NAME;
+	  start = curr;
+	}
+	break;
+      case IN_NAME:
+	if ( *curr == '/' ) {
+	  parse_state = IN_SLASH;
+	  *curr = 0;
+	  *tmp = curr;
+	  return start;
+	}
+	break;
+      default:
+	return NULL;
+      }
+      ++curr;
+    }
+
+    if ( parse_state == IN_NAME ) {
+      *tmp = NULL;
+      return start;
+    }
+    else {
+      *tmp = NULL;
+      return NULL;
+    }
+  }
+  else return NULL;
+}
+
 /*
  * char * get_temp_dir( void );
  *
