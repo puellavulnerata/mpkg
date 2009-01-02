@@ -15,6 +15,7 @@ struct cmd_s {
   { "help", help_callback },
   { "test", test_callback },
   { "install", install_main },
+  { "createdb", createdb_main },
   { NULL, NULL }
 };
 
