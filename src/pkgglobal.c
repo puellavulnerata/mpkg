@@ -1,3 +1,9 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <unistd.h>
+
 #include <pkg.h>
 
 static char *pkg = NULL;
@@ -48,6 +54,64 @@ void init_pkg_globals( void ) {
   pkg = DEFAULT_PKG_STRING;
   root = DEFAULT_ROOT_STRING;
   temp = DEFAULT_TEMP_STRING;
+}
+
+int sanity_check_globals( void ) {
+  char *old_cwd, *tmp;
+  int result, status;
+
+  status = 0;
+  old_cwd = get_current_dir();
+  if ( old_cwd ) {
+    /* We must be able to chdir() to instroot and tempdir */
+    result = chdir( root );
+    if ( result == 0 ) {
+      result = chdir( temp );
+      if ( result == 0 ) {
+	/*
+	 * If instroot is not a prefix of pkgdir, we must be able to
+	 * chdir() to pkgdir as well.  If instroot is a prefix of
+	 * pkgdir, createdb is allowed to create pkgdir if it needs
+	 * to.  Since instroot and pkgdir are canonicalized, path
+	 * prefixity is equivalent to string prefixity.
+	 */
+
+	tmp = strstr( pkg, root );
+	if ( tmp != pkg ) {
+	  /* Not a prefix, need to check pkgdir too */
+
+	  result = chdir( pkg );
+	  if ( result != 0 ) {
+	    fprintf( stderr,
+		     "Couldn't chdir to pkgdir %s (and instroot %s isn't a prefix)\n",
+		     pkg, root );
+	    status = -1;
+	  }
+	}
+      }
+      else {
+	fprintf( stderr,
+		 "Couldn't chdir() to tempdir %s\n",
+		 root );
+	status = -1;
+      }
+    }
+    else {
+      fprintf( stderr,
+	       "Couldn't chdir() to instroot %s\n",
+	       root );
+      status = -1;
+    }
+
+    chdir( old_cwd );
+    free( old_cwd );
+  }
+  else {
+    fprintf( stderr, "sanity_check_globals(): couldn't get cwd\n" );
+    status = -1;
+  }
+
+  return status;
 }
 
 const char * get_pkg( void ) {

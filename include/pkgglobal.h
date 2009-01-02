@@ -7,6 +7,7 @@
 
 void free_pkg_globals( void );
 void init_pkg_globals( void );
+int sanity_check_globals( void );
 
 const char * get_pkg( void );
 void set_pkg( const char * );
