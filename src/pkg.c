@@ -110,5 +110,7 @@ int main( int argc, char **argv, char **envp ) {
 }
 
 static void test_callback( int argc, char **argv ) {
-  printf( "test\n" );
+  printf( "test callback\n" );
+  printf( "pkgdir is %s, instroot is %s, tempdir is %s\n",
+	  get_pkg(), get_root(), get_temp() );
 }
