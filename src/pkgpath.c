@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <pkg.h>
 
-char * canonicalize_and_copy( char *path ) {
+char * canonicalize_and_copy( const char *path ) {
   char *tmp, *tmp2;
   unsigned long len, slashes, i, j, n, parts, initial_dotdots;
   int in_slash_run, absolute, starting;
@@ -197,7 +197,7 @@ int canonicalize_path( char *path ) {
   return status;
 }
 
-char * concatenate_paths( char *a, char *b ) {
+char * concatenate_paths( const char *a, const char *b ) {
   char *tmp, *concat;
   unsigned long alen, blen;
 
@@ -216,7 +216,7 @@ char * concatenate_paths( char *a, char *b ) {
   else return NULL;
 }
 
-int is_absolute( char *path ) {
+int is_absolute( const char *path ) {
   if ( path ) {
     return ( *path == '/' ) ? 1 : 0;
   }
