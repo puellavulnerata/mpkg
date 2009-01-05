@@ -353,7 +353,7 @@ static int parse_header_from_line( pkg_descr_hdr *h, char *line ) {
 	    if ( result == 1 ) {
 	      temp = malloc( sizeof( char ) * ( pkg_name_len + 1 ) );
 	      if ( temp ) {
-		strncpy( temp, pkg_name, pkg_name_len );
+		strncpy( temp, pkg_name, pkg_name_len + 1 );
 		h->pkg_name = temp;
 		h->pkg_time = (time_t)pkg_time;
 	      }
