@@ -1,6 +1,11 @@
 #ifndef __PKG_DB_H__
 #define __PKG_DB_H__
 
+#define PKGDB_TEXT_FILE_NAME "pkg-managed-files"
+#ifdef DB_BDB
+#define PKGDB_BDB_FILE_NAME "pkg-managed-files.bdb"
+#endif /* DB_BDB */
+
 typedef struct {
   void *private;
   char * (*query)( void *, char * );

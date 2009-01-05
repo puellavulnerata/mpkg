@@ -55,10 +55,6 @@ int insert_into_pkg_db( pkg_db *db, char *key, char *value ) {
 
 pkg_db * open_pkg_db( void ) {
   pkg_db *db;
-  const char *text_file_name = "pkg-managed-files";
-#ifdef DB_BDB
-  const char *bdb_file_name = "pkg-managed-files.bdb";
-#endif
   const char *pkg_dir;
   char *temp;
   int temp_len;
@@ -68,10 +64,10 @@ pkg_db * open_pkg_db( void ) {
 
 #ifdef DB_BDB
   if ( !db ) {
-    temp_len = strlen( pkg_dir ) + strlen( bdb_file_name ) + 2;
+    temp_len = strlen( pkg_dir ) + strlen( PKGDB_BDB_FILE_NAME ) + 2;
     temp = malloc( sizeof( *temp ) * temp_len );
     if ( temp ) {
-      snprintf( temp, temp_len, "%s/%s", pkg_dir, bdb_file_name );
+      snprintf( temp, temp_len, "%s/%s", pkg_dir, PKGDB_BDB_FILE_NAME );
       db = open_pkg_db_bdb( temp );
       free( temp );
     }
@@ -79,10 +75,10 @@ pkg_db * open_pkg_db( void ) {
 #endif
 
   if ( !db ) {
-    temp_len = strlen( pkg_dir ) + strlen( text_file_name ) + 2;
+    temp_len = strlen( pkg_dir ) + strlen( PKGDB_TEXT_FILE_NAME ) + 2;
     temp = malloc( sizeof( *temp ) * temp_len );
     if ( temp ) {
-      snprintf( temp, temp_len, "%s/%s", pkg_dir, text_file_name );
+      snprintf( temp, temp_len, "%s/%s", pkg_dir, PKGDB_TEXT_FILE_NAME );
       db = open_pkg_db_text_file( temp );
       free( temp );
     }
