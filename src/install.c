@@ -5,6 +5,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <grp.h>
+#include <pwd.h>
 #include <unistd.h>
 
 #include <pkg.h>
@@ -14,15 +16,35 @@
 #define INSTALL_OUT_OF_DISK -2
 
 typedef struct {
+  uid_t owner;
+  gid_t group;
+  mode_t mode;
+  /* Whether to claim this dir for the package */
+  char claim;
+  /* Whether to delete on unroll */
+  char unroll;
+} dir_descr;
+
+typedef struct {
   /* Temporary name for old package-description, created in pass one */
   char *old_descr;
+  /*
+   * Directories created in pass two; keys are char * (canonicalized
+   * pathnames) and values are dir_descr *
+   */
+  rbtree *pass_two_dirs;
 } install_state;
 
 static install_state * alloc_install_state( void );
-static int do_install_descr( pkg_db *, pkg_handle *, install_state * );
+static void * copy_dir_descr( void * );
+static int do_install_descr( pkg_handle *, install_state * );
+static int do_preinst_dirs( pkg_handle *, install_state * );
+static int do_preinst_one_dir( install_state *, pkg_descr_entry * );
+static void free_dir_descr( void * );
 static void free_install_state( install_state * );
 static int install_pkg( pkg_db *, pkg_handle * );
-static int rollback_install_descr( pkg_db *, pkg_handle *, install_state * );
+static int rollback_install_descr( pkg_handle *, install_state * );
+static int rollback_preinst_dirs( pkg_handle *, install_state * );
 
 static install_state * alloc_install_state( void ) {
   install_state *is;
@@ -30,13 +52,32 @@ static install_state * alloc_install_state( void ) {
   is = malloc( sizeof( *is ) );
   if ( is ) {
     is->old_descr = NULL;
+    is->pass_two_dirs = NULL;
   }
 
   return is;
 }
 
-static int do_install_descr( pkg_db *db,
-			     pkg_handle *p,
+static void * copy_dir_descr( void *dv ) {
+  dir_descr *d, *dcpy;
+
+  dcpy = NULL;
+  d = (dir_descr *)dv;
+  if ( d ) {
+    dcpy = malloc( sizeof( *dcpy ) );
+    if ( dcpy ) {
+      dcpy->owner = d->owner;
+      dcpy->group = d->group;
+      dcpy->mode = d->mode;
+      dcpy->claim = d->claim;
+      dcpy->unroll = d->unroll;
+    }
+  }
+
+  return dcpy;
+}
+
+static int do_install_descr( pkg_handle *p,
 			     install_state *is ) {
   /*
    * Install the package-description in pkgdir.  We check if an
@@ -50,7 +91,7 @@ static int do_install_descr( pkg_db *db,
   struct stat stat_buf;
 
   status = INSTALL_SUCCESS;
-  if ( db && p && is ) {
+  if ( p && is ) {
     result = chdir( get_pkg() );
     if ( result == 0 ) {
       pkg_name = p->descr->hdr.pkg_name;
@@ -82,7 +123,10 @@ static int do_install_descr( pkg_db *db,
       }
       else {
 	if ( errno != ENOENT ) {
-	  /* We couldn't stat, but not because it doesn't exist.  This is bad. */
+	  /*
+	   * We couldn't stat, but not because it doesn't exist.  This
+	   * is bad.
+	   */
 
 	  fprintf( stderr, "Couldn't stat %s/%s: %s\n",
 		   get_pkg(), pkg_name, strerror( errno ) );
@@ -91,11 +135,14 @@ static int do_install_descr( pkg_db *db,
       }
 
       if ( status == INSTALL_SUCCESS ) {
-	/* We renamed the old description if necessary.  Now install the new one. */
+	/*
+	 * We renamed the old description if necessary.  Now install
+	 * the new one.
+	 */
 
 	result = write_pkg_descr_to_file( p->descr, pkg_name );
 	if ( result != 0 ) {
-	  fprintf( stderr, "Couldn't write package description %to %s/s\n",
+	  fprintf( stderr, "Couldn't write package description to %s/%s\n",
 		   get_pkg(), pkg_name );
 	  /*
 	   * A write failure at this point means either we don't have
@@ -119,11 +166,236 @@ static int do_install_descr( pkg_db *db,
   return status;
 }
 
+static int do_preinst_dirs( pkg_handle *p,
+			    install_state *is ) {
+  int status, result, i;
+  pkg_descr *desc;
+  pkg_descr_entry *e;
+
+  status = INSTALL_SUCCESS;
+  if ( p && is ) {
+    desc = p->descr;
+    for ( i = 0; i < desc->num_entries; ++i ) {
+      e = desc->entries + i;
+      if ( e->type == ENTRY_DIRECTORY ) {
+	result = do_preinst_one_dir( is, e );
+	if ( result != INSTALL_SUCCESS ) {
+	  status = result;
+	  break;
+	}
+      }
+    }
+  }
+  else status = INSTALL_ERROR;
+  return status;
+}
+
+static int do_preinst_one_dir( install_state *is,
+			       pkg_descr_entry *e ) {
+  int status, result, record_dir;
+  char *p, *pcomp, *next, *temp, *currpath, *currpath_end, *currcomp;
+  void *stringbuf;
+  struct stat st;
+  dir_descr dd;
+  uid_t owner;
+  gid_t group;
+  struct passwd *pwd;
+  struct group *grp;
+
+  status = INSTALL_SUCCESS;
+  if ( is && e ) {
+    if ( e->type == ENTRY_DIRECTORY ) {
+      pwd = getpwnam( e->owner );
+      if ( pwd ) owner = pwd->pw_uid;
+      else {
+	/* Error or not found, default to 0 */
+	owner = 0;
+      }
+
+      grp = getgrnam( e->group );
+      if ( grp ) group = grp->gr_gid;
+      else {
+	/* Error or not found, default to 0 */
+	group = 0;
+      }
+
+      p = canonicalize_and_copy( e->filename );
+      if ( p ) {
+	currpath = malloc( sizeof( *currpath ) * ( strlen( p ) + 1 ) );
+	if ( currpath ) {
+	  result = chdir( get_root() );
+	  if ( result == 0 ) {
+	    pcomp = get_path_component( p, &temp );
+
+	    currpath_end = currpath;
+	    while ( pcomp && status == INSTALL_SUCCESS ) {
+	      sprintf( currpath_end, "/%s", pcomp );
+	      currpath_end += strlen( pcomp ) + 1;
+
+	      currcomp = copy_string( pcomp );
+	      if ( currcomp ) {
+		next = get_path_component( NULL, &temp );
+		record_dir = 0;
+		result = lstat( currcomp, &st );
+		if ( result == 0 ) {
+		  if ( S_ISDIR( st.st_mode ) ) {
+		    /*
+		     * This directory already exists:
+		     *
+		     * If this is the last path component, claim it.
+		     * In any case, chdir to it.
+		     */
+
+		    if ( !next ) {
+		      dd.unroll = 0;
+		      dd.claim = 1;
+		      dd.owner = owner;
+		      dd.group = group;
+		      dd.mode = e->u.d.mode;
+		      record_dir = 1;
+		    }
+
+		    result = chdir( currcomp );
+		    if ( result != 0 ) {
+		      fprintf( stderr, "Error: couldn't chdir to %s%s: %s\n",
+			       get_root(), currpath, strerror( errno ) );
+		      status = INSTALL_ERROR;
+		    }
+		  }
+		  else {
+		    /*
+		     * Something else already exists!  This is an error.
+		     */
+		    fprintf( stderr,
+			     "Error: %s%s exists and is not a directory.\n",
+			     get_root(), currpath );
+		    status = INSTALL_ERROR;
+		  }
+		}
+		else {
+		  if ( errno == ENOENT ) {
+		    /*
+		     * This component doesn't exist:
+		     *
+		     * Create a directory, and mark it for unrolling.  If
+		     * this is the last component, also claim it.
+		     */
+
+		    dd.unroll = 1;
+		    if ( next ) {
+		      dd.claim = 0;
+		      /*
+		       * Create directories owned by root/root, mode 0755
+		       * by default
+		       */
+
+		      dd.owner = 0;
+		      dd.group = 0;
+		      dd.mode = 0755;
+		    }
+		    else {
+		      dd.claim = 1;
+		      dd.owner = owner;
+		      dd.group = group;
+		      dd.mode = e->u.d.mode;
+		    }
+
+		    result = mkdir( currcomp, 0700 );
+		    if ( result == 0 ) {
+		      result = chdir( currcomp );
+		      if ( result == 0 ) {
+			record_dir = 1;
+		      }
+		      else {
+			fprintf( stderr,
+				 "Error: couldn't chdir to %s%s: %s\n",
+				 get_root(), currpath, strerror( errno ) );
+			status = INSTALL_ERROR;
+		      }
+		    }
+		    else {
+		      fprintf( stderr, "Error: couldn't mkdir %s%s: %s\n",
+			       get_root(), currpath, strerror( errno ) );
+		      if ( errno == ENOSPC ) status = INSTALL_OUT_OF_DISK;
+		      else status = INSTALL_ERROR;
+		    }
+		  }
+		  else {
+		    /*
+		     * Some other error; p is NULL-terminated after pcomp
+		     * right now
+		     */
+		    fprintf( stderr, "Error: couldn't stat %s%s: %s\n",
+			     get_root(), currpath, strerror( errno ) );
+		    status = INSTALL_ERROR;
+		  }
+		}
+
+		if ( record_dir ) {
+		  if ( !(is->pass_two_dirs) ) {
+		    is->pass_two_dirs =
+		      rbtree_alloc( rbtree_string_comparator,
+				    rbtree_string_copier,
+				    rbtree_string_free,
+				    copy_dir_descr,
+				    free_dir_descr );
+		  }
+		
+		  if ( is->pass_two_dirs ) {
+		    result = rbtree_insert( is->pass_two_dirs, currpath,
+					    &dd );
+		    if ( result != RBTREE_SUCCESS ) {
+		      fprintf( stderr, "Couldn't insert into rbtree.\n" );
+		      status = INSTALL_ERROR;
+		    }
+		  }
+		  else {
+		    fprintf( stderr, "Couldn't allocate rbtree.\n" );
+		    status = INSTALL_ERROR;
+		  }
+		}
+
+		free( currcomp );
+	      }
+	      else status = INSTALL_ERROR;
+
+	      pcomp = next;
+	    }
+	  }
+	  else {
+	    fprintf( stderr, "Couldn't chdir to install root %s!\n",
+		     get_root() );
+	    status = INSTALL_ERROR;
+	  }
+
+	  free( currpath );
+	}
+	else status = INSTALL_ERROR;
+
+	free( p );
+      }
+      else status = INSTALL_ERROR;
+    }
+    else status = INSTALL_ERROR;
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static void free_dir_descr( void *dv ) {
+  if ( dv ) free( dv );
+}
+
 static void free_install_state( install_state *is ) {
   if ( is ) {
     if ( is->old_descr ) {
       free( is->old_descr );
       is->old_descr = NULL;
+    }
+    if ( is->pass_two_dirs ) {
+      rbtree_free( is->pass_two_dirs );
+      is->pass_two_dirs = NULL;
     }
     free( is );
   }
@@ -135,33 +407,37 @@ void install_main( int argc, char **argv ) {
   pkg_handle *p;
 
   if ( argc > 0 ) {
-    db = open_pkg_db();
-    if ( db ) {
-      for ( i = 0; i < argc; ++i ) {
-	p = open_pkg_file( argv[i] );
-	if ( p ) {
-	  status = install_pkg( db, p );
-	  close_pkg( p );
-	  if ( status != INSTALL_SUCCESS ) {
-	    fprintf( stderr, "Failed to install %s\n", argv[i] );
-	    if ( status == INSTALL_OUT_OF_DISK ) {
-	      fprintf( stderr,
-		       "Out of disk space trying to install %s, stopping.\n",
-		       argv[i] );
-	      break;
+    status = sanity_check_globals();
+    if ( status == 0 ) {
+      db = open_pkg_db();
+      if ( db ) {
+	for ( i = 0; i < argc; ++i ) {
+	  p = open_pkg_file( argv[i] );
+	  if ( p ) {
+	    status = install_pkg( db, p );
+	    close_pkg( p );
+	    if ( status != INSTALL_SUCCESS ) {
+	      fprintf( stderr, "Failed to install %s\n", argv[i] );
+	      if ( status == INSTALL_OUT_OF_DISK ) {
+		fprintf( stderr,
+			 "Out of disk space trying to install %s, stopping.\n",
+			 argv[i] );
+		break;
+	      }
 	    }
 	  }
+	  else {
+	    fprintf( stderr, "Warning: couldn't open %s to install\n",
+		     argv[i] );
+	  }
 	}
-	else {
-	  fprintf( stderr, "Warning: couldn't open %s to install\n",
-		   argv[i] );
-	}
+	close_pkg_db( db );
       }
-      close_pkg_db( db );
+      else {
+	fprintf( stderr, "Couldn't open package database\n" );
+      }
     }
-    else {
-      fprintf( stderr, "Couldn't open package database\n" );
-    }
+    /* else sanity_check_globals() will emit a warning */
   }
   else {
     fprintf( stderr,
@@ -260,13 +536,23 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
     is = alloc_install_state();
     if ( is ) {
       /* Pass one */
-      status = do_install_descr( db, p, is );
+      status = do_install_descr( p, is );
       if ( status != INSTALL_SUCCESS ) goto err_install_descr;
-      /* TODO - Passes two through eight */
+      /* Pass two */
+      status = do_preinst_dirs( p, is );
+      if ( status != INSTALL_SUCCESS ) goto err_preinst_dirs;
+
+      printf( "Finished do_preinst_dirs()\n" );
+
+      /* TODO - Passes three through eight */
       goto success;
 
+    err_preinst_dirs:
+      rollback_preinst_dirs( p, is );
+
+      printf( "Finished rollback_preinst_dirs()\n" );
     err_install_descr:
-      rollback_install_descr( db, p, is );
+      rollback_install_descr( p, is );
 
     success:
       free_install_state( is );
@@ -283,12 +569,13 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
   return status;
 }
 
-static int rollback_install_descr( pkg_db *db, pkg_handle *p, install_state *is ) {
+static int rollback_install_descr( pkg_handle *p,
+				   install_state *is ) {
   int status, result;
   char *pkg_name;
 
   status = INSTALL_SUCCESS;
-  if ( db && p && is ) {
+  if ( p && is ) {
     result = chdir( get_pkg() );
     if ( result == 0 ) {
       pkg_name = p->descr->hdr.pkg_name;
@@ -313,6 +600,68 @@ static int rollback_install_descr( pkg_db *db, pkg_handle *p, install_state *is 
     }
   }
   else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int rollback_preinst_dirs( pkg_handle *p, install_state *is ) {
+  rbtree_node *n;
+  char *path, *full_path;
+  dir_descr *descr;
+  void *descr_v;
+  int status;
+
+  status = INSTALL_SUCCESS;
+  if ( is->pass_two_dirs ) {
+    n = NULL;
+    do {
+      descr = NULL;
+      path = rbtree_enum( is->pass_two_dirs, n, &descr_v, &n );
+      if ( path ) {
+	if ( descr_v ) {
+	  descr = (dir_descr *)descr_v;
+	  if ( descr->unroll ) {
+	    /*
+	     * We need to unroll this one.  We might see it before any
+	     * subdirectories that also need to be unrolled, so just
+	     * recrm() it, and we might have already recrm()ed a
+	     * parent, so it won't exist, so ignore any errors. This
+	     * is unroll and we can't do anything about them anyway.
+	     */
+	    full_path = malloc( sizeof( *full_path ) *
+				( strlen( get_root() ) +
+				  strlen( path ) + 2 ) );
+	    if ( full_path ) {
+	      sprintf( full_path, "%s/%s", get_root(), path );
+	      if ( canonicalize_path( full_path ) == 0 ) {
+		recrm( full_path );
+	      }
+	      else {
+		fprintf( stderr,
+			 "rollback_preinst_dirs() couldn't canonicalize a path.\n" );
+		status = INSTALL_ERROR;
+	      }
+	      free( full_path );
+	    }
+	    else {
+	      fprintf( stderr,
+		       "rollback_preinst_dirs() couldn't allocate memory\n" );
+	      status = INSTALL_ERROR;
+	    }
+	  }
+	}
+	else {
+	  fprintf( stderr,
+		   "rollback_preinst_dirs() saw path %s but NULL descr\n",
+		   path );
+	  status = INSTALL_ERROR;
+	}
+      }
+    } while ( n );
+
+    rbtree_free( is->pass_two_dirs );
+    is->pass_two_dirs = NULL;
+  }
 
   return status;
 }
