@@ -282,6 +282,100 @@ int is_whitespace( char *str ) {
   else return -1;
 }
 
+#define LINK_OR_COPY_BUF_SIZE 1024
+
+int link_or_copy( const char *dest, const char *src ) {
+  struct stat st;
+  int result, status, dstfd, srcfd;
+  unsigned char buf[LINK_OR_COPY_BUF_SIZE];
+  ssize_t count, wcount, written;
+
+  status = LINK_OR_COPY_SUCCESS;
+  if ( src && dest ) {
+    /*
+     * link() will not overwrite an existing file, so check for one and unlink
+     * if necessary.
+     */
+    result = lstat( dest, &st );
+    if ( result == 0 ) {
+      /* Something exists, try to unlink it. */
+
+      result = unlink( dest );
+      if ( result != 0 ) status = LINK_OR_COPY_ERROR;
+    }
+    else if ( errno != ENOENT ) status = LINK_OR_COPY_ERROR;
+
+    if ( status == LINK_OR_COPY_SUCCESS ) {
+      /* The destination name should be clear now, try to link it */
+
+      result = link( src, dest );
+      if ( result != 0 ) {
+	/* The call to link() failed.  Why? */
+
+	if ( errno == ENOSPC ) status = LINK_OR_COPY_OUT_OF_DISK;
+	else if ( errno == EXDEV || /* Cross-device hard link error */
+		  /* Could be a filesystem with no hard link support */
+		  errno == EPERM ||
+		  /* Maximum link count for src already */
+		  errno == EMLINK ) {
+	  /* Go ahead and try the copy */
+	  dstfd = open( dest, O_RDWR | O_CREAT | O_EXCL, 0600 );
+	  if ( dstfd != -1 ) {
+	    srcfd = open( src, O_RDONLY );
+	    if ( srcfd != -1 ) {
+	      while ( ( count = read( srcfd, buf, LINK_OR_COPY_BUF_SIZE ) )
+		      > 0 ) {
+		written = 0;
+		while ( written < count &&
+			( wcount = write( dstfd, buf + written,
+					  count - written ) ) >= 0 ) {
+		  written += wcount;
+		}
+
+		if ( wcount < 0 ) {
+		  /* Error writing */
+		  if ( errno == ENOSPC ) status = LINK_OR_COPY_OUT_OF_DISK;
+		  else status = LINK_OR_COPY_ERROR;
+		  /* Break out of read loop */
+		  break;
+		}
+	      }
+
+	      /*
+	       * We fell out of the loop, so count <= 0.  count == 0
+	       * means EOF, count < 0 means error.  Check status in
+	       * case we set it on a write error and broke out of the
+	       * loop.
+	       */
+
+	      if ( status == LINK_OR_COPY_SUCCESS && count < 0 )
+		status = LINK_OR_COPY_ERROR;
+
+	      close( srcfd );
+	    }
+	    /* Source open failed */
+	    else status = LINK_OR_COPY_ERROR;
+
+	    close( dstfd );
+	    /* If we failed somewhere, unlink it */
+	    if ( status != LINK_OR_COPY_SUCCESS ) unlink( dest );
+	  }
+	  else {
+	    /* Couldn't open dest for copy */
+	    
+	    if ( errno == ENOSPC ) status = LINK_OR_COPY_OUT_OF_DISK;
+	    else status = LINK_OR_COPY_ERROR;
+	  }
+	}
+	/* Not worth trying copy */
+	else status = LINK_OR_COPY_ERROR;
+      }
+    }
+  }
+
+  return status;
+}
+
 /*
  * int parse_strings_from_line( char *line, char ***strings_out );
  *

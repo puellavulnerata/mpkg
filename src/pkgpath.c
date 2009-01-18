@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <pkg.h>
 
+static int get_last_and_base( const char *, int *, const char **, int * );
+
 char * canonicalize_and_copy( const char *path ) {
   char *tmp, *tmp2;
   unsigned long len, slashes, i, j, n, parts, initial_dotdots;
@@ -214,6 +216,112 @@ char * concatenate_paths( const char *a, const char *b ) {
     return concat;
   }
   else return NULL;
+}
+
+char * get_base_path( const char *path ) {
+  const char *lastcomp_base;
+  int baselen, lastcomp_len, result;
+  char *base;
+
+  base = NULL;
+  if ( path ) {
+    result = get_last_and_base( path, &baselen,
+				&lastcomp_base, &lastcomp_len );
+    if ( result == 0 ) {
+      base = malloc( sizeof( *base ) * ( baselen + 1 ) );
+      if ( lastcomp ) {
+	memcpy( base, path, sizeof( *base ) * baselen );
+	base[baselen] = '\0';
+      }
+    }
+  }
+
+  return base;
+}
+
+static int get_last_and_base( const char *path, int *baselen_out,
+			      const char **lastcomp_base_out,
+			      int *lastcomp_len_out ) {
+  enum {
+    GLC_START,
+    GLC_COMP,
+    GLC_SLASH,
+    GLC_DONE;
+  } state;
+  const char *curr, *currcomp;
+  int baselen, currlen, currcomp_len, status;
+
+  status = 0;
+  if ( path && baselen_out && lastcomp_base_out && lastcomp_len_out ) {
+    state = GLC_START;
+    curr = path;
+    currcomp = NULL;
+    currcomp_len = 0;
+    currlen = 0;
+    while ( state != GLC_DONE ) {
+      switch ( state ) {
+      case GLC_START:
+	if ( *curr == '\0' ) state = GLC_DONE;
+	else if ( *curr == '/' ) state = GLC_SLASH;
+	else {
+	  state = GLC_COMP;
+	  currcomp = curr;
+	  currcomp_len = 1;
+	}
+	break;
+      case GLC_COMP:
+	if ( *curr == '\0' ) state = GLC_DONE;
+	else if ( *curr == '/' ) state = GLC_SLASH;
+	else ++currcomp_len;
+	break;
+      case GLC_SLASH:
+	if ( *curr == '\0' ) state = GLC_DONE;
+	else if ( *curr != '/' ) {
+	  state = GLC_COMP;
+	  currcomp = curr;
+	  currcomp_len = 1;
+	}
+	/* if ( *curr == '/' ) do nothing */
+	break;
+      default:
+	/* error case */
+	state = GLC_DONE;
+	currcomp = NULL;
+	currcomp_len = 0;
+	status = -1;
+      }
+
+      ++curr;
+    }
+
+    *baselen_out = currcomp - path;
+    *lastcomp_base_out = currcomp;
+    *lastcomp_len_out = currcomp_len;
+  }
+  else status = -1;
+
+  return status;
+}
+
+char * get_last_component( const char *path ) {
+  const char *lastcomp_base;
+  int baselen, lastcomp_len, result;
+  char *lastcomp;
+
+  lastcomp = NULL;
+  if ( path ) {
+    result = get_last_and_base( path, &baselen,
+				&lastcomp_base, &lastcomp_len );
+    if ( result == 0 ) {
+      lastcomp = malloc( sizeof( *lastcomp ) * ( lastcomp_len + 1 ) );
+      if ( lastcomp ) {
+	memcpy( lastcomp, lastcomp_base, sizeof( *lastcomp ) * lastcomp_len );
+	lastcomp[lastcomp_len] = '\0';
+      }
+    }
+  }
+
+  return lastcomp;
 }
 
 int is_absolute( const char *path ) {
