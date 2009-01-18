@@ -433,6 +433,7 @@ static int do_preinst_files( pkg_handle *p, install_state *is ) {
   int status, result, i;
   pkg_descr *desc;
   pkg_descr_entry *e;
+  char *temp;
 
   status = INSTALL_SUCCESS;
   if ( p && is ) {
@@ -442,6 +443,11 @@ static int do_preinst_files( pkg_handle *p, install_state *is ) {
       if ( e->type == ENTRY_FILE ) {
 	result = do_preinst_one_file( is, p, e );
 	if ( result != INSTALL_SUCCESS ) {
+	  temp = concatenate_paths( get_root(), e->filename );
+	  if ( temp ) {
+	    fprintf( stderr, "Couldn't preinstall %s\n", temp );
+	    free( temp );
+	  }
 	  status = result;
 	  break;
 	}
@@ -605,7 +611,7 @@ static int do_preinst_one_file( install_state *is,
   gid_t group;
   struct passwd *pwd;
   struct group *grp;
-  char *p, *format, *src, *lastcomp, *base;
+  char *p, *format, *src, *lastcomp, *base, *temp;
   int format_len;
   file_descr fd;
 
@@ -646,7 +652,13 @@ static int do_preinst_one_file( install_state *is,
 	   * path, so we just need to create a temporary and record.
 	   */
 
-	  src = concatenate_paths( pkg->unpacked_dir, e->filename );
+	  src = NULL;
+	  temp = concatenate_paths( pkg->unpacked_dir, "package-content" );
+	  if ( temp ) {
+	    src = concatenate_paths( temp, e->filename );
+	    free( temp );
+	  }
+
 	  if ( src ) {
 	    base = get_base_path( p );
 	    lastcomp = get_last_component( p );
@@ -656,7 +668,9 @@ static int do_preinst_one_file( install_state *is,
 	      if ( format ) {
 		snprintf( format, format_len, ".%s.mpkg.%d.XXXXXX",
 			  lastcomp, getpid() );
+
 		tmpfd = mkstemp( format );
+
 		if ( tmpfd != -1 ) {
 		  /*
 		   * Okay, we've got a temp, and its name is now in
@@ -667,6 +681,7 @@ static int do_preinst_one_file( install_state *is,
 		  unlink( format );
 		  /* Try to link src to format, copy if not possible. */
 		  result = link_or_copy( format, src );
+
 		  if ( result == LINK_OR_COPY_SUCCESS ) {
 		    fd.owner = owner;
 		    fd.group = group;
@@ -732,7 +747,12 @@ static int do_preinst_one_file( install_state *is,
 	  }
 	  else status = INSTALL_ERROR;
 	}
-	else status = result;
+	else {
+	  fprintf( stderr,
+		   "do_preinst_one_file(): couldn't create enclosing directories for install target %s\n",
+		   e->filename );
+	  status = result;
+	}
 
 	free( p );
       }
@@ -978,24 +998,14 @@ static int rollback_dir_set( rbtree **dirs ) {
 	       * parent, so it won't exist, so ignore any errors. This
 	       * is unroll and we can't do anything about them anyway.
 	       */
-	      full_path = malloc( sizeof( *full_path ) *
-				  ( strlen( get_root() ) +
-				    strlen( path ) + 2 ) );
+	      full_path = concatenate_paths( get_root(), path );
 	      if ( full_path ) {
-		sprintf( full_path, "%s/%s", get_root(), path );
-		if ( canonicalize_path( full_path ) == 0 ) {
-		  recrm( full_path );
-		}
-		else {
-		  fprintf( stderr,
-			   "rollback_preinst_dirs() couldn't canonicalize a path.\n" );
-		  status = INSTALL_ERROR;
-		}
+		recrm( full_path );
 		free( full_path );
 	      }
 	      else {
 		fprintf( stderr,
-			 "rollback_preinst_dirs() couldn't allocate memory\n" );
+			 "rollback_dir_set() couldn't allocate memory\n" );
 		status = INSTALL_ERROR;
 	      }
 	    }
@@ -1039,7 +1049,6 @@ static int rollback_file_set( rbtree **files ) {
 	    if ( descr->temp_file ) {
 	      full_path = concatenate_paths( get_root(), descr->temp_file );
 	      if ( full_path ) {
-		printf( "rollback_file_set(): %s\n", full_path );
 		unlink( full_path );
 		free( full_path );
 	      }
