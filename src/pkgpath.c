@@ -229,7 +229,7 @@ char * get_base_path( const char *path ) {
 				&lastcomp_base, &lastcomp_len );
     if ( result == 0 ) {
       base = malloc( sizeof( *base ) * ( baselen + 1 ) );
-      if ( lastcomp ) {
+      if ( base ) {
 	memcpy( base, path, sizeof( *base ) * baselen );
 	base[baselen] = '\0';
       }
@@ -246,7 +246,7 @@ static int get_last_and_base( const char *path, int *baselen_out,
     GLC_START,
     GLC_COMP,
     GLC_SLASH,
-    GLC_DONE;
+    GLC_DONE
   } state;
   const char *curr, *currcomp;
   int baselen, currlen, currcomp_len, status;
