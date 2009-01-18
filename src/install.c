@@ -715,6 +715,8 @@ static int do_preinst_one_file( install_state *is,
 		       * fd.temp_file, and if it failed we don't need
 		       * it any longer, so we can free it now.
 		       */
+
+		      free( fd.temp_file );
 		    }
 		    else status = INSTALL_ERROR;
 
