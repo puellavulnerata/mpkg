@@ -335,6 +335,10 @@ int link_or_copy( const char *dest, const char *src ) {
 
 		if ( wcount < 0 ) {
 		  /* Error writing */
+		  fprintf( stderr,
+			   "link_or_copy(): write error during copy: %s\n",
+			   strerror( errno ) );
+
 		  if ( errno == ENOSPC ) status = LINK_OR_COPY_OUT_OF_DISK;
 		  else status = LINK_OR_COPY_ERROR;
 		  /* Break out of read loop */
@@ -349,13 +353,22 @@ int link_or_copy( const char *dest, const char *src ) {
 	       * loop.
 	       */
 
-	      if ( status == LINK_OR_COPY_SUCCESS && count < 0 )
+	      if ( status == LINK_OR_COPY_SUCCESS && count < 0 ) {
+		fprintf( stderr,
+			 "link_or_copy(): read error during copy: %s\n",
+			 strerror( errno ) );
 		status = LINK_OR_COPY_ERROR;
+	      }
 
 	      close( srcfd );
 	    }
 	    /* Source open failed */
-	    else status = LINK_OR_COPY_ERROR;
+	    else {
+	      fprintf( stderr,
+		       "link_or_copy(): couldn't open src %s for copy: %s\n",
+		       src, strerror( errno ) );
+	      status = LINK_OR_COPY_ERROR;
+	    }
 
 	    close( dstfd );
 	    /* If we failed somewhere, unlink it */
@@ -363,6 +376,10 @@ int link_or_copy( const char *dest, const char *src ) {
 	  }
 	  else {
 	    /* Couldn't open dest for copy */
+
+	      fprintf( stderr,
+		       "link_or_copy(): couldn't open dest %s for copy: %s\n",
+		       dest, strerror( errno ) );
 	    
 	    if ( errno == ENOSPC ) status = LINK_OR_COPY_OUT_OF_DISK;
 	    else status = LINK_OR_COPY_ERROR;
