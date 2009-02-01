@@ -83,6 +83,22 @@ typedef struct {
    * and values are symlink_descr *.
    */
   rbtree *pass_four_symlinks;
+  /*
+   * Canonicalized pathnames (not including instroot) claimed by
+   * passes five through seven.  This is used by pass eight to remove
+   * existing files.  The keys are char * and the values are always
+   * NULL.  This is only created if pass one flags an existing
+   * package-description for this package name.
+   */
+  rbtree *pass_eight_names_installed;
+  /*
+   * Directories in need of having their mtimes adjusted after every
+   * other pass has finished adding/removing things.  This is created
+   * in pass five and used in pass nine.  The keys are char *
+   * (canonicalized pathnames to directories not including instroot)
+   * and the values are dir_descr *.
+   */
+  rbtree *pass_nine_dirs_to_process;
 } install_state;
 
 static install_state * alloc_install_state( void );
@@ -91,6 +107,9 @@ static void * copy_file_descr( void * );
 static void * copy_symlink_descr( void * );
 static int create_dirs_as_needed( pkg_handle *, const char *, rbtree ** );
 static int do_install_descr( pkg_handle *, install_state * );
+static int do_install_dirs( pkg_db *, pkg_handle *, install_state * );
+static int do_install_one_dir( pkg_db *, pkg_handle *, install_state *, 
+			       char *, dir_descr * );
 static int do_preinst_dirs( pkg_handle *, install_state * );
 static int do_preinst_files( pkg_handle *, install_state * );
 static int do_preinst_one_dir( install_state *, pkg_handle *,
@@ -124,6 +143,8 @@ static install_state * alloc_install_state( void ) {
     is->pass_three_files = NULL;
     is->pass_four_dirs = NULL;
     is->pass_four_symlinks = NULL;
+    is->pass_eight_names_installed = NULL;
+    is->pass_nine_dirs_to_process = NULL;
   }
 
   return is;
@@ -473,8 +494,156 @@ static int do_install_descr( pkg_handle *p,
   return status;
 }
 
-static int do_preinst_dirs( pkg_handle *p,
-			    install_state *is ) {
+static int do_install_dirs( pkg_db *db, pkg_handle *p, install_state *is ) {
+  int status, result;
+  rbtree_node *n;
+  char *path;
+  dir_descr *descr;
+  void *descr_v;
+
+  status = INSTALL_SUCCESS;
+  if ( p && is ) {
+    if ( is->pass_two_dirs ) {
+      n = NULL;
+      do {
+	descr = NULL;
+	path = rbtree_enum( is->pass_two_dirs, n, &descr_v, &n );
+	if ( path ) {
+	  if ( descr_v ) {
+	    descr = (dir_descr *)descr_v;
+	    result = do_install_one_dir( db, p, is, path, descr );
+	    if ( result != INSTALL_SUCCESS ) status = result;
+	  }
+	  else {
+	    fprintf( stderr,
+		     "do_install_dirs() saw path %s but NULL descr\n",
+		     path );
+	    status = INSTALL_ERROR;
+	  }
+	}
+	/* else no nodes left */
+      } while ( n );
+
+      rbtree_free( is->pass_two_dirs );
+      is->pass_two_dirs = NULL;
+    }
+    /* else nothing to do */
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int do_install_one_dir( pkg_db *db, pkg_handle *p, install_state *is,
+			       char *path, dir_descr *descr ) {
+  int status, result;
+  char *full_path;
+
+  status = INSTALL_SUCCESS;
+  if ( db && p && is && path && descr ) {
+    full_path = concatenate_paths( get_root(), path );
+    if ( full_path ) {
+      /* First, we set the owner/group/mode */
+
+      result = chown( full_path, descr->owner, descr->group );
+      if ( result != 0 ) {
+	fprintf( stderr, "Warning: couldn't chown directory %s: %s\n",
+		 full_path, strerror( errno ) );
+      }
+
+      result = chmod( full_path, descr->mode );
+      if ( result != 0 ) {
+	fprintf( stderr, "Warning: couldn't chmod directory %s: %s\n",
+		 full_path, strerror( errno ) );
+      }
+
+      /* Next, we queue it up to have its mtime adjusted in pass nine */
+
+      if ( !(is->pass_nine_dirs_to_process) ) {
+	is->pass_nine_dirs_to_process =
+	  rbtree_alloc( rbtree_string_comparator,
+			rbtree_string_copier,
+			rbtree_string_free,
+			copy_dir_descr,
+			free_dir_descr );
+      }
+		
+      if ( is->pass_nine_dirs_to_process ) {
+	result = rbtree_insert( is->pass_nine_dirs_to_process,
+				path, descr );
+	if ( result != RBTREE_SUCCESS ) {
+	  fprintf( stderr,
+		   "Warning: couldn't queue %s for mtime adjustment.\n",
+		   full_path );
+	}
+      }
+      else {
+	fprintf( stderr,
+		 "Warning: couldn't allocate rbtree to queue %s for mtime adjustment\n",
+		 full_path );
+      }
+
+      /* Check if we need to claim it for this package */
+      if ( descr->claim ) {
+	/*
+	 * Check if we had an old install under this name discovered
+	 * in pass one, and so need to record for finalization.
+	 */
+
+	if ( is->old_descr ) {
+	  /* If we're claiming, we need to record this for pass eight */
+
+	  if ( !(is->pass_eight_names_installed) ) {
+	    is->pass_eight_names_installed =
+	      rbtree_alloc( rbtree_string_comparator,
+			    rbtree_string_copier,
+			    rbtree_string_free,
+			    NULL, NULL );
+	  }
+	  
+	  if ( is->pass_eight_names_installed ) {
+	    result = rbtree_insert( is->pass_eight_names_installed,
+				    path, NULL );
+	    if ( result != RBTREE_SUCCESS ) {
+	      fprintf( stderr,
+		       "Warning: couldn't record %s as installed for the finalization pass!\n",
+		       full_path );
+	    }
+	  }
+	  else {
+	    fprintf( stderr,
+		     "Warning: couldn't allocate rbtree to record %s as installed for the finalization pass!\n",
+		     full_path );
+	  }
+	}
+	/* else no need to record it */
+
+	/* Claim it */
+	
+	result = insert_into_pkg_db( db, path, p->descr->hdr.pkg_name );
+	if ( result == 0 ) {
+	  printf( "ID %s\n", full_path );
+	}
+	else {
+	  fprintf( stderr, "Warning: couldn't claim %s for %s\n",
+		   path, p->descr->hdr.pkg_name );
+	}
+      }
+
+      free( full_path );
+    }
+    else {
+      fprintf( stderr, "Error installing directory %s: %s\n",
+	       path, "failed to allocate memory" );
+      status = INSTALL_ERROR;
+    }
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int do_preinst_dirs( pkg_handle *p, install_state *is ) {
   int status, result, i;
   pkg_descr *desc;
   pkg_descr_entry *e;
@@ -500,6 +669,7 @@ static int do_preinst_dirs( pkg_handle *p,
     }
   }
   else status = INSTALL_ERROR;
+
   return status;
 }
 
@@ -529,6 +699,7 @@ static int do_preinst_files( pkg_handle *p, install_state *is ) {
     }
   }
   else status = INSTALL_ERROR;
+
   return status;
 }
 
@@ -1069,6 +1240,14 @@ static void free_install_state( install_state *is ) {
       rbtree_free( is->pass_four_symlinks );
       is->pass_four_symlinks = NULL;
     }
+    if ( is->pass_eight_names_installed ) {
+      rbtree_free( is->pass_eight_names_installed );
+      is->pass_eight_names_installed;
+    }
+    if ( is->pass_nine_dirs_to_process ) {
+      rbtree_free( is->pass_nine_dirs_to_process );
+      is->pass_nine_dirs_to_process;
+    }
     free( is );
   }
 }
@@ -1168,7 +1347,9 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
    * 5.) Iterate over the directory list in the package installer
    * again; every directory in it already exists due to pass two.
    * Adjust the mode, owner and group of these directories to match,
-   * and assert ownership of them in the package db.
+   * and assert ownership of them in the package db.  Create a list of
+   * directories claimed for use in pass nine.  Create and/or update a
+   * list of pathnames installed for use in pass eight.
    *
    * 6.) Iterate through the list of temporaries we create in pass
    * three.  For each one, test if something already exists in with
@@ -1177,17 +1358,22 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
    * and remove its contents, making sure to also remove entries from
    * the package db.  Now that the installation path is clear, link
    * the temporary to the new name, and then unlink the temporary.
-   * Assert ownership of this path in the package db.
+   * Assert ownership of this path in the package db.  Create and/or
+   * update a list of pathnames installed for use in pass eight.
    *
    * 7.) Iterate through the list of renames from pass 4, removing
    * them and their package db entries as needed.  Iterate through the
-   * list of links created, creating package db entries.
+   * list of links created, creating package db entries. Create and/or
+   * update a list of pathnames installed for use in pass eight.
    *
    * 8.) If we renamed an existing package-description for this
    * package in phase one, load it, and iterate over its contents.
    * For each item, check if ownership was asserted in the package db,
    * and if we installed at some point.  If it was owned and we did
    * not install it, remove it.  Delete the old package-description.
+   *
+   * 9.) Process the list of directories from pass five and adjust
+   * the mtimes.
    *
    * At this point, all package files are in place and the package db
    * is updated.  We're done.
@@ -1235,9 +1421,13 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
       status = do_preinst_symlinks( p, is );
       if ( status != INSTALL_SUCCESS ) goto err_preinst_symlinks;
       
-      /* TODO - Passes five through eight */
+      /* Pass five */
+      status = do_install_dirs( db, p, is );
+      if ( status != INSTALL_SUCCESS ) goto install_done;
 
-      goto success;
+      /* TODO - Passes six through nine */
+
+      goto install_done;
 
     err_preinst_symlinks:
       rollback_preinst_symlinks( p, is );
@@ -1251,7 +1441,7 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
     err_install_descr:
       rollback_install_descr( p, is );
 
-    success:
+    install_done:
       free_install_state( is );
     }
     else {
