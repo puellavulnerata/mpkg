@@ -19,6 +19,7 @@ typedef struct {
   uid_t owner;
   gid_t group;
   mode_t mode;
+  time_t mtime;
   /* Whether to claim this dir for the package */
   char claim;
   /* Whether to delete on unroll */
@@ -37,6 +38,18 @@ typedef struct {
   mode_t mode;
   time_t mtime;
 } file_descr;
+
+typedef struct {
+  /*
+   * Full canonical path (but not including instroot) to temp name
+   * where the placeholder symlink was created
+   */
+  char *temp_symlink;
+  /* Desired owner/group/mtime of installed symlink */
+  uid_t owner;
+  gid_t group;
+  time_t mtime;
+} symlink_descr;
 
 typedef struct {
   /* Temporary name for old package-description, created in pass one */
@@ -58,27 +71,47 @@ typedef struct {
    * values are file_descr *.
    */
   rbtree *pass_three_files;
+  /*
+   * Directories created in pass four: keys are char * (canonicalized
+   * pathnames not including instroot) and values are dir_descr *;
+   * claim is always set to zero.
+   */
+  rbtree *pass_four_dirs;
+  /*
+   * Temporary symlinks created in pass four: keys are char *
+   * (canonicalized pathnames of install names not including instroot)
+   * and values are symlink_descr *.
+   */
+  rbtree *pass_four_symlinks;
 } install_state;
 
 static install_state * alloc_install_state( void );
 static void * copy_dir_descr( void * );
 static void * copy_file_descr( void * );
-static int create_dirs_as_needed( const char *, rbtree ** );
+static void * copy_symlink_descr( void * );
+static int create_dirs_as_needed( pkg_handle *, const char *, rbtree ** );
 static int do_install_descr( pkg_handle *, install_state * );
 static int do_preinst_dirs( pkg_handle *, install_state * );
 static int do_preinst_files( pkg_handle *, install_state * );
-static int do_preinst_one_dir( install_state *, pkg_descr_entry * );
+static int do_preinst_one_dir( install_state *, pkg_handle *,
+			       pkg_descr_entry * );
 static int do_preinst_one_file( install_state *, pkg_handle *,
 				pkg_descr_entry * );
+static int do_preinst_one_symlink( install_state *, pkg_handle *,
+				   pkg_descr_entry * );
+static int do_preinst_symlinks( pkg_handle *, install_state * );
 static void free_dir_descr( void * );
 static void free_file_descr( void * );
 static void free_install_state( install_state * );
+static void free_symlink_descr( void * );
 static int install_pkg( pkg_db *, pkg_handle * );
 static int rollback_dir_set( rbtree ** );
 static int rollback_file_set( rbtree ** );
 static int rollback_install_descr( pkg_handle *, install_state * );
 static int rollback_preinst_dirs( pkg_handle *, install_state * );
 static int rollback_preinst_files( pkg_handle *, install_state * );
+static int rollback_preinst_symlinks( pkg_handle *, install_state * );
+static int rollback_symlink_set( rbtree ** );
 
 static install_state * alloc_install_state( void ) {
   install_state *is;
@@ -89,6 +122,8 @@ static install_state * alloc_install_state( void ) {
     is->pass_two_dirs = NULL;
     is->pass_three_dirs = NULL;
     is->pass_three_files = NULL;
+    is->pass_four_dirs = NULL;
+    is->pass_four_symlinks = NULL;
   }
 
   return is;
@@ -105,6 +140,7 @@ static void * copy_dir_descr( void *dv ) {
       dcpy->owner = d->owner;
       dcpy->group = d->group;
       dcpy->mode = d->mode;
+      dcpy->mtime = d->mtime;
       dcpy->claim = d->claim;
       dcpy->unroll = d->unroll;
     }
@@ -140,15 +176,43 @@ static void * copy_file_descr( void *fv ) {
   return fcpy;
 }
 
+static void * copy_symlink_descr( void *sv ) {
+  symlink_descr *s, *scpy;
+
+  scpy = NULL;
+  s = (symlink_descr *)sv;
+  if ( s ) {
+    scpy = malloc( sizeof( *scpy ) );
+    if ( scpy ) {
+      scpy->owner = s->owner;
+      scpy->group = s->group;
+      scpy->mtime = s->mtime;
+      if ( s->temp_symlink ) {
+	scpy->temp_symlink = copy_string( s->temp_symlink );
+	if ( !(scpy->temp_symlink) ) {
+	  /* Alloc error */
+	  free( scpy );
+	  scpy = NULL;
+	}
+      }
+      else scpy->temp_symlink = NULL;
+    }
+  }
+
+  return scpy;
+}
+
 /*
- * int create_dirs_as_needed( const char *path, rbtree **dirs );
+ * int create_dirs_as_needed( pkg_handle *pkg, const char *path,
+ *                            rbtree **dirs );
  *
  * This function creates directories as needed to contain path, but
  * not path itself, under instroot, and records entries for them in
  * the rbtree of dir_descr records dirs.
  */
 
-static int create_dirs_as_needed( const char *path, rbtree **dirs ) {
+static int create_dirs_as_needed( pkg_handle *pkg, const char *path,
+				  rbtree **dirs ) {
   char *p, *currpath, *currpath_end, *currcomp, *next, *pcomp, *temp;
   dir_descr dd;
   struct stat st;
@@ -225,6 +289,10 @@ static int create_dirs_as_needed( const char *path, rbtree **dirs ) {
 		    dd.owner = 0;
 		    dd.group = 0;
 		    dd.mode = 0755;
+		    
+		    /* Use the pkg mtime */
+
+		    dd.mtime = pkg->descr->hdr.pkg_time;
 
 		    result = mkdir( currcomp, 0700 );
 		    if ( result == 0 ) {
@@ -410,6 +478,7 @@ static int do_preinst_dirs( pkg_handle *p,
   int status, result, i;
   pkg_descr *desc;
   pkg_descr_entry *e;
+  char *temp;
 
   status = INSTALL_SUCCESS;
   if ( p && is ) {
@@ -417,8 +486,13 @@ static int do_preinst_dirs( pkg_handle *p,
     for ( i = 0; i < desc->num_entries; ++i ) {
       e = desc->entries + i;
       if ( e->type == ENTRY_DIRECTORY ) {
-	result = do_preinst_one_dir( is, e );
+	result = do_preinst_one_dir( is, p, e );
 	if ( result != INSTALL_SUCCESS ) {
+	  temp = concatenate_paths( get_root(), e->filename );
+	  if ( temp ) {
+	    fprintf( stderr, "Couldn't preinstall directory %s\n", temp );
+	    free( temp );
+	  }
 	  status = result;
 	  break;
 	}
@@ -445,7 +519,7 @@ static int do_preinst_files( pkg_handle *p, install_state *is ) {
 	if ( result != INSTALL_SUCCESS ) {
 	  temp = concatenate_paths( get_root(), e->filename );
 	  if ( temp ) {
-	    fprintf( stderr, "Couldn't preinstall %s\n", temp );
+	    fprintf( stderr, "Couldn't preinstall file %s\n", temp );
 	    free( temp );
 	  }
 	  status = result;
@@ -459,6 +533,7 @@ static int do_preinst_files( pkg_handle *p, install_state *is ) {
 }
 
 static int do_preinst_one_dir( install_state *is,
+			       pkg_handle *pkg,
 			       pkg_descr_entry *e ) {
   int status, result, record_dir;
   char *p, *lastcomp;
@@ -490,7 +565,7 @@ static int do_preinst_one_dir( install_state *is,
        * Create all needed dirs enclosing this path and record for
        * possible later unroll
        */
-      result = create_dirs_as_needed( e->filename, &(is->pass_two_dirs) );
+      result = create_dirs_as_needed( pkg, e->filename, &(is->pass_two_dirs) );
 
       if ( result == INSTALL_SUCCESS ) {
 	/*
@@ -518,6 +593,7 @@ static int do_preinst_one_dir( install_state *is,
 		dd.owner = owner;
 		dd.group = group;
 		dd.mode = e->u.d.mode;
+		dd.mtime = pkg->descr->hdr.pkg_time;
 		dd.unroll = 0;
 		dd.claim = 1;
 	      }
@@ -644,7 +720,8 @@ static int do_preinst_one_file( install_state *is,
 	 * Create all needed dirs enclosing this path and record for
 	 * possible later unroll
 	 */
-	result = create_dirs_as_needed( e->filename, &(is->pass_three_dirs) );
+	result = create_dirs_as_needed( pkg, e->filename,
+					&(is->pass_three_dirs) );
 
 	if ( result == INSTALL_SUCCESS ) {
 	  /*
@@ -743,6 +820,7 @@ static int do_preinst_one_file( install_state *is,
 	    else {
 	      if ( base ) free( base );
 	      if ( lastcomp ) free( lastcomp );
+	      status = INSTALL_ERROR;
 	    }
 
 	    free( src );
@@ -764,6 +842,190 @@ static int do_preinst_one_file( install_state *is,
   }
   else status = INSTALL_ERROR;  
 
+  return status;
+}
+
+static int do_preinst_one_symlink( install_state *is,
+				   pkg_handle *pkg,
+				   pkg_descr_entry *e ) {
+  int status, result;
+  uid_t owner;
+  gid_t group;
+  struct passwd *pwd;
+  struct group *grp;
+  char *p, *base, *lastcomp, *format;
+  int format_len, tmpfd;
+  symlink_descr sd;
+
+  status = INSTALL_SUCCESS;
+  if ( is && pkg && e ) {
+    if ( e->type == ENTRY_SYMLINK ) {
+      pwd = getpwnam( e->owner );
+      if ( pwd ) owner = pwd->pw_uid;
+      else {
+	/* Error or not found, default to 0 */
+	owner = 0;
+      }
+
+      grp = getgrnam( e->group );
+      if ( grp ) group = grp->gr_gid;
+      else {
+	/* Error or not found, default to 0 */
+	group = 0;
+      }
+
+      p = canonicalize_and_copy( e->filename );
+      if ( p ) {
+	/*
+	 * p is the canonical pathname of the target, not including
+	 * instroot.  It will be the key for the is->pass_four_symlinks
+	 * entry.
+	 */
+
+	/*
+	 * Create all needed dirs enclosing this path and record for
+	 * possible later unroll
+	 */
+	result = create_dirs_as_needed( pkg, e->filename,
+					&(is->pass_four_dirs) );
+	if ( result == INSTALL_SUCCESS ) {
+	  /*
+	   * We should be chdir()ed to the directory enclosing this
+	   * path, so we just need to create a temporary and record.
+	   */
+
+	  base = get_base_path( p );
+	  lastcomp = get_last_component( p );
+	  if ( base && lastcomp ) {
+	    format_len = strlen( lastcomp ) + 32;
+	    format = malloc( sizeof( *format ) * format_len );
+	    if ( format ) {
+	      snprintf( format, format_len, ".%s.mpkg.%d.XXXXXX",
+			lastcomp, getpid() );
+
+	      tmpfd = mkstemp( format );
+
+	      if ( tmpfd != -1 ) {
+		/*
+		 * Okay, we've got a temp, and its name is now in
+		 * format.  Clear out the temp, and try to create out
+		 * placeholder symlink.
+		 */
+		  close( tmpfd );
+		  unlink( format );
+
+		  result = symlink( e->u.s.target, format );
+		  if ( result == 0 ) {
+		    sd.owner = owner;
+		    sd.group = group;
+		    sd.mtime = pkg->descr->hdr.pkg_time;
+		    sd.temp_symlink = concatenate_paths( base, format );
+		    if ( sd.temp_symlink ) {
+		      if ( !(is->pass_four_symlinks) ) {
+			is->pass_four_symlinks =
+			  rbtree_alloc( rbtree_string_comparator,
+					rbtree_string_copier,
+					rbtree_string_free,
+					copy_symlink_descr,
+					free_symlink_descr );
+		      }
+		
+		      if ( is->pass_four_symlinks ) {
+			result =
+			  rbtree_insert( is->pass_four_symlinks, p, &sd );
+			if ( result != RBTREE_SUCCESS ) {
+			  fprintf( stderr, "Couldn't insert into rbtree.\n" );
+			  status = INSTALL_ERROR;
+			}
+		      }
+		      else {
+			fprintf( stderr, "Couldn't allocate rbtree.\n" );
+			status = INSTALL_ERROR;
+		      }
+
+		      /* 
+		       * If the insert went okay it copied
+		       * fd.temp_file, and if it failed we don't need
+		       * it any longer, so we can free it now.
+		       */
+
+		      free( sd.temp_symlink );
+		    }
+		    else status = INSTALL_ERROR;
+
+		    /*
+		     * If we failed somewhere, be sure to delete the
+		     * placeholder symlink.
+		     */
+
+		    if ( status != INSTALL_SUCCESS ) unlink( format );
+		  }
+		  else {
+		    if ( errno == ENOSPC )
+		      status = INSTALL_OUT_OF_DISK;
+		    else status = INSTALL_ERROR;
+		  }
+	      }
+	      else status = INSTALL_ERROR;
+
+	      free( format );
+	    }
+	    else status = INSTALL_ERROR;
+
+	    free( base );
+	    free( lastcomp );
+	  }
+	  else {
+	    if ( base ) free( base );
+	    if ( lastcomp ) free( lastcomp );
+	    status = INSTALL_ERROR;
+	  }
+	}
+	else {
+	  fprintf( stderr,
+		   "do_preinst_one_symlink(): couldn't create enclosing directories for install target %s\n",
+		   e->filename );
+	  status = result;
+	}
+
+	free( p );
+      }
+      else status = INSTALL_ERROR;
+    }
+    else status = INSTALL_ERROR;
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+
+static int do_preinst_symlinks( pkg_handle *p, install_state *is ) {
+  int status, result, i;
+  pkg_descr *desc;
+  pkg_descr_entry *e;
+  char *temp;
+
+  status = INSTALL_SUCCESS;
+  if ( p && is ) {
+    desc = p->descr;
+    for ( i = 0; i < desc->num_entries; ++i ) {
+      e = desc->entries + i;
+      if ( e->type == ENTRY_SYMLINK ) {
+	result = do_preinst_one_symlink( is, p, e );
+	if ( result != INSTALL_SUCCESS ) {
+	  temp = concatenate_paths( get_root(), e->filename );
+	  if ( temp ) {
+	    fprintf( stderr, "Couldn't preinstall symlink %s\n", temp );
+	    free( temp );
+	  }
+	  status = result;
+	  break;
+	}
+      }
+    }
+  }
+  else status = INSTALL_ERROR;
   return status;
 }
 
@@ -799,7 +1061,25 @@ static void free_install_state( install_state *is ) {
       rbtree_free( is->pass_three_files );
       is->pass_three_files = NULL;
     }
+    if ( is->pass_four_dirs ) {
+      rbtree_free( is->pass_four_dirs );
+      is->pass_four_dirs = NULL;
+    }
+    if ( is->pass_four_symlinks ) {
+      rbtree_free( is->pass_four_symlinks );
+      is->pass_four_symlinks = NULL;
+    }
     free( is );
+  }
+}
+
+static void free_symlink_descr( void *sv ) {
+  symlink_descr *s;
+
+  if ( sv ) {
+    s = (symlink_descr *)sv;
+    if ( s->temp_symlink ) free( s->temp_symlink );
+    free( s );
   }
 }
 
@@ -875,8 +1155,10 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
    *
    * 4.) Iterate through the list of symlinks in the package.  If
    * nothing with that name already exists, create the symlink.  If
-   * something exists, rename to a temporary name.  Record the list of
-   * links created and renames performed.
+   * something exists, create the same symlink under a temporary name
+   * so we take up the disk space during pre-inst.  Record the list of
+   * symlinks created and temporary names used so they can be adjusted
+   * in pass seven.
    *
    * At this point, we have created everything we need to in the
    * location it needs to be installed in, so we are at a maximum of
@@ -940,16 +1222,25 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
       /* Pass one */
       status = do_install_descr( p, is );
       if ( status != INSTALL_SUCCESS ) goto err_install_descr;
+
       /* Pass two */
       status = do_preinst_dirs( p, is );
       if ( status != INSTALL_SUCCESS ) goto err_preinst_dirs;
+
       /* Pass three */
       status = do_preinst_files( p, is );
       if ( status != INSTALL_SUCCESS ) goto err_preinst_files;
 
-      /* TODO - Passes four through eight */
+      /* Pass four */
+      status = do_preinst_symlinks( p, is );
+      if ( status != INSTALL_SUCCESS ) goto err_preinst_symlinks;
+      
+      /* TODO - Passes five through eight */
 
       goto success;
+
+    err_preinst_symlinks:
+      rollback_preinst_symlinks( p, is );
 
     err_preinst_files:
       rollback_preinst_files( p, is );
@@ -1075,11 +1366,13 @@ static int rollback_file_set( rbtree **files ) {
 	    status = INSTALL_ERROR;
 	  }
 	}
+	/* else no nodes left */
       } while ( n );
 
       rbtree_free( *files );
       *files = NULL;
-    }    
+    }
+    /* else nothing to do */
   }
   else status = INSTALL_ERROR;
 
@@ -1145,6 +1438,79 @@ static int rollback_preinst_files( pkg_handle *p, install_state *is ) {
   }
   else status = INSTALL_ERROR;
 
- err_out:
   return status;
+}
+
+static int rollback_preinst_symlinks( pkg_handle *p, install_state *is ) {
+  int status, result;
+
+  status = INSTALL_SUCCESS;
+  if ( p && is ) {
+    result = rollback_symlink_set( &(is->pass_four_symlinks) );
+    if ( status == INSTALL_SUCCESS && result != INSTALL_SUCCESS )
+      status = result;
+
+    result = rollback_dir_set( &(is->pass_four_dirs) );
+    if ( status == INSTALL_SUCCESS && result != INSTALL_SUCCESS )
+      status = result;
+  }
+
+  return status;
+}
+
+static int rollback_symlink_set( rbtree **symlinks ) {
+  int status;
+  rbtree_node *n;
+  symlink_descr *descr;
+  void *descr_v;
+  char *install_target, *full_path;
+
+  status = INSTALL_SUCCESS;
+  if ( symlinks ) {
+    if ( *symlinks ) {
+      n = NULL;
+      do {
+	descr = NULL;
+	install_target = rbtree_enum( *symlinks, n, &descr_v, &n );
+	if ( install_target ) {
+	  if ( descr_v ) {
+	    descr = (symlink_descr *)descr_v;
+	    if ( descr->temp_symlink ) {
+	      full_path = concatenate_paths( get_root(), descr->temp_symlink );
+	      if ( full_path ) {
+		unlink( full_path );
+		free( full_path );
+	      }
+	      else {
+		fprintf( stderr,
+			 "rollback_symlink_set() couldn't construct full path for %s\n",
+			 descr->temp_symlink );
+		status = INSTALL_ERROR;
+	      }
+	    }
+	    else {
+	      fprintf( stderr,
+		       "rollback_symlink_set() saw target %s with NULL temp_symlink\n",
+		       install_target );
+	      status = INSTALL_ERROR;
+	    }
+	  }
+     	  else {
+	    fprintf( stderr,
+		     "rollback_symlink_set() saw target %s but NULL descr\n",
+		     install_target );
+	    status = INSTALL_ERROR;
+	  }
+	}
+	/* else no nodes left */
+      } while ( n );
+
+      rbtree_free( *symlinks );
+      *symlinks = NULL;
+    }
+    /* else nothing to do */
+  }  
+  else status = INSTALL_ERROR;
+
+  return status;  
 }
