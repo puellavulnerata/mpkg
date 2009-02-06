@@ -609,6 +609,47 @@ char * read_line_from_file( FILE *fp ) {
 }
 
 /*
+ * int read_symlink_target( const char *path, char **target_out );
+ *
+ * Read the target of a symlink into a newly allocated buffer.
+ */
+
+int read_symlink_target( const char *path, char **target_out ) {
+  int status, result;
+  struct stat st;
+  char *target;
+
+  status = READ_SYMLINK_SUCCESS;
+  if ( path && target_out ) {
+    result = lstat( path, &st );
+    if ( result == 0 ) {
+      if ( S_ISLNK( st.st_mode ) ) {
+	/* Okay, path exists and is a symlink */
+
+	target = malloc( sizeof( *target ) * ( st.st_size + 1 ) );
+	if ( target ) {
+	  result = readlink( path, target, st.st_size );
+	  if ( result >= 0 ) {
+	    target[result] = '\0';
+	    *target_out = target;
+	  }
+	  else {
+	    free( target );
+	    status = READ_SYMLINK_READLINK_ERROR;
+	  }
+	}
+	else status = READ_SYMLINK_MALLOC_ERROR;
+      }
+      else status = READ_SYMLINK_NOT_SYMLINK;
+    }
+    else status = READ_SYMLINK_LSTAT_ERROR;
+  }
+  else status = READ_SYMLINK_ERROR;
+
+  return status;
+}
+
+/*
  * int recrm( const char *path );
  *
  * Recursively unlink a directory tree

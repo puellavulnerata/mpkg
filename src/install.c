@@ -115,6 +115,9 @@ static int do_install_one_dir( pkg_db *, pkg_handle *, install_state *,
 			       char *, dir_descr * );
 static int do_install_one_file( pkg_db *, pkg_handle *, install_state *, 
 				char *, file_descr * );
+static int do_install_one_symlink( pkg_db *, pkg_handle *, install_state *, 
+				   char *, symlink_descr * );
+static int do_install_symlinks( pkg_db *, pkg_handle *, install_state * );
 static int do_preinst_dirs( pkg_handle *, install_state * );
 static int do_preinst_files( pkg_handle *, install_state * );
 static int do_preinst_one_dir( install_state *, pkg_handle *,
@@ -786,8 +789,6 @@ static int do_install_one_file( pkg_db *db, pkg_handle *p, install_state *is,
 	     */
 
 	    if ( is->old_descr ) {
-	      /* If we're claiming, we need to record this for pass eight */
-
 	      if ( !(is->pass_eight_names_installed) ) {
 		is->pass_eight_names_installed =
 		  rbtree_alloc( rbtree_string_comparator,
@@ -882,6 +883,273 @@ static int do_install_one_file( pkg_db *db, pkg_handle *p, install_state *is,
       fprintf( stderr, "Error installing file %s: %s\n",
 	       path, "failed to allocate memory" );
       status = INSTALL_ERROR;
+    }
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int do_install_one_symlink( pkg_db *db, pkg_handle *p,
+				   install_state *is,
+				   char *path, symlink_descr *descr ) {
+  int status, result, should_clear;
+  char *full_path, *temp_path, *target;
+  struct stat st;
+  struct utimbuf tb;
+
+  status = INSTALL_SUCCESS;
+  if ( db && p && is && path && descr ) {
+    full_path = concatenate_paths( get_root(), path );
+    if ( full_path ) {
+      should_clear = 0;
+      /* First, check if the path already exists */
+      result = lstat( full_path, &st );
+      if ( result == 0 ) {
+	/* lstat() succeeded, check what's there */
+	if ( S_ISREG( st.st_mode ) || S_ISLNK( st.st_mode ) ) {
+	  /* There is an existing regular file or symlink */
+	  
+	  /*
+	   * Try to remove it; we don't need to remove its pkgdb
+	   * entry, because we will overwrite with an entry for this
+	   * file if we succeed
+	   */
+
+	  result = unlink( full_path );
+	  if ( result != 0 ) {
+	    fprintf( stderr, "Couldn't remove existing %s at %s: %s\n",
+		     ( S_ISREG( st.st_mode ) ) ? "file" : "symlink",
+		     full_path, strerror( errno ) );
+	    status = INSTALL_ERROR;
+	  }
+	  /*
+	   * We removed something, so if we fail later we should clear
+	   * its pkgdb entry.
+	   */
+	  else should_clear = 1;
+	}
+	else if ( S_ISDIR( st.st_mode ) ) {
+	  /* There is an existing directory */
+
+	  /* For now, this is an error */
+
+	  fprintf( stderr,
+		   "There was a directory present at %s while trying to install\n",
+		   full_path );
+	  status = INSTALL_ERROR;
+	}
+	else {
+	  /* Something else */
+
+	  /* This is an error */
+
+	  fprintf( stderr,
+		   "Some other filesystem object (st_mode = %o) was present at %s\n",
+		   st.st_mode, full_path );
+	  status = INSTALL_ERROR;
+	}
+      }
+      else {
+	/*
+	 * lstat() failed, did it fail because the path did not exist,
+	 * or some other problematic reason?
+	 */
+
+	if ( errno != ENOENT ) {
+	  /* Something else, this is an error */
+
+	  fprintf( stderr, "Couldn't lstat() %s: %s\n",
+		   full_path, strerror( errno ) );
+	  status = INSTALL_ERROR;
+	}
+      }
+
+      if ( status == INSTALL_SUCCESS ) {
+	/* We're okay so far, and we know the target path is clear */
+
+	temp_path = concatenate_paths( get_root(), descr->temp_symlink );
+	if ( temp_path ) {
+	  /*
+	   * We need to read the content of the symlink at temp_path,
+	   * unlink it, and create a new symlink at full_path, and
+	   * adjust its owner/group/mtime
+	   */
+
+	  target = NULL;
+	  result = read_symlink_target( temp_path, &target );
+	  if ( result == READ_SYMLINK_SUCCESS ) {
+	    unlink( temp_path );
+
+	    result = symlink( target, full_path );
+	    if ( result == 0 ) {
+	      /*
+	       * Okay, the link is created.  Now we just need to
+	       * record for pass eight, adjust its owner/group/mtime
+	       * and claim it,
+	       */
+	      
+	      /*
+	       * If we had an old package install under this name, we
+	       * need to record this for pass eight.
+	       */
+
+	      if ( is->old_descr ) {
+		if ( !(is->pass_eight_names_installed) ) {
+		  is->pass_eight_names_installed =
+		    rbtree_alloc( rbtree_string_comparator,
+				  rbtree_string_copier,
+				  rbtree_string_free,
+				  NULL, NULL );
+		}
+	  
+		if ( is->pass_eight_names_installed ) {
+		  result = rbtree_insert( is->pass_eight_names_installed,
+					  path, NULL );
+		  if ( result != RBTREE_SUCCESS ) {
+		    fprintf( stderr,
+			     "Warning: couldn't record %s as installed for the finalization pass!\n",
+			     full_path );
+		  }
+		}
+		else {
+		  fprintf( stderr,
+			   "Warning: couldn't allocate rbtree to record %s as installed for the finalization pass!\n",
+			   full_path );
+		}
+	      }
+
+	      /* Adjust owner/group/mtime */
+	      result = chown( full_path, descr->owner, descr->group );
+	      if ( result != 0 ) {
+		fprintf( stderr, "Warning: couldn't chown %s: %s\n",
+			 full_path, strerror( errno ) );
+	      }
+
+	      tb.actime = descr->mtime;
+	      tb.modtime = descr->mtime;
+	      result = utime( full_path, &tb );
+	      if ( result != 0 ) {
+		fprintf( stderr, "Warning: couldn't utime %s: %s\n",
+			 full_path, strerror( errno ) );
+	      }
+
+	      /* Claim it */
+	      result = insert_into_pkg_db( db, path, p->descr->hdr.pkg_name );
+	      if ( result == 0 ) {
+		printf( "IS %s\n", full_path );
+	      }
+	      else {
+		fprintf( stderr, "Warning: couldn't claim %s for %s\n",
+			 path, p->descr->hdr.pkg_name );
+	      }
+	    }
+	    else {
+	      fprintf( stderr,
+		       "Failed to symlink() while installing symlink %s: %s\n",
+		       full_path, strerror( errno ) );
+	      status = INSTALL_ERROR;
+	    }
+
+	    free( target );
+	  }
+	  else if ( result == READ_SYMLINK_LSTAT_ERROR ) {
+	    fprintf( stderr,
+		     "Failed to lstat() while installing symlink %s: %s\n",
+		     full_path, strerror( errno ) );
+	    status = INSTALL_ERROR;
+	  }
+	  else if ( result == READ_SYMLINK_READLINK_ERROR ) {
+	    fprintf( stderr,
+		     "Failed to readlink() while installing symlink %s: %s\n",
+		     full_path, strerror( errno ) );
+	    status = INSTALL_ERROR;
+	  }
+	  else if ( result == READ_SYMLINK_MALLOC_ERROR ) {
+	    fprintf( stderr, "Error installing symlink %s: %s\n",
+		     full_path, "failed to allocate memory" );
+	    status = INSTALL_ERROR;
+	  }
+	  else {
+	    fprintf( stderr,
+		     "Error in read_symlink_target() while installing symlink %s\n" );
+	    status = INSTALL_ERROR;
+	  }
+
+	  /* Otherwise, it was unlinked above */
+	  if ( status != INSTALL_SUCCESS ) unlink( temp_path );
+
+	  free( temp_path );
+	}
+	else {
+	  fprintf( stderr, "Error installing symlink %s: %s\n",
+		   path, "failed to allocate memory" );
+	  status = INSTALL_ERROR;
+	}
+      }
+
+      if ( status != INSTALL_SUCCESS && should_clear ) {
+	/* Clear out the existing pkgdb entry */
+
+	delete_from_pkg_db( db, path );
+      }
+
+      free( full_path );
+    }
+    else {
+      fprintf( stderr, "Error installing symlink %s: %s\n",
+	       path, "failed to allocate memory" );
+      status = INSTALL_ERROR;
+    }
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int do_install_symlinks( pkg_db *db, pkg_handle *p,
+				install_state *is ) {
+  int status, result;
+  rbtree_node *n;
+  char *path;
+  symlink_descr *descr;
+  void *descr_v;
+
+  status = INSTALL_SUCCESS;
+  if ( db && p && is ) {
+    if ( is->pass_four_symlinks ) {
+      n = NULL;
+      do {
+	descr = NULL;
+	path = rbtree_enum( is->pass_four_symlinks, n, &descr_v, &n );
+	if ( path ) {
+	  if ( descr_v ) {
+	    descr = (symlink_descr *)descr_v;
+	    result = do_install_one_symlink( db, p, is, path, descr );
+	    if ( result != INSTALL_SUCCESS ) status = result;
+	  }
+	  else {
+	    fprintf( stderr,
+		     "do_install_symlinks() saw path %s but NULL descr\n",
+		     path );
+	    status = INSTALL_ERROR;
+	  }
+	}
+	/* else no nodes left */
+      } while ( n );
+
+      rbtree_free( is->pass_four_symlinks );
+      is->pass_four_symlinks = NULL;
+    }
+    /* else nothing to do */
+
+    /*
+     * We can also get rid of pass_four_dirs, since rollback is no
+     * longer possible anyway at this point.
+     */
+    if ( is->pass_four_dirs ) {
+      rbtree_free( is->pass_four_dirs );
+      is->pass_four_dirs = NULL;
     }
   }
   else status = INSTALL_ERROR;
@@ -1674,7 +1942,11 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
       status = do_install_files( db, p, is );
       if ( status != INSTALL_SUCCESS ) goto install_done;
 
-      /* TODO - Passes seven through nine */
+      /* Pass seven */
+      status = do_install_symlinks( db, p, is );
+      if ( status != INSTALL_SUCCESS ) goto install_done;
+
+      /* TODO - Passes eight and nine */
 
       goto install_done;
 
