@@ -552,7 +552,7 @@ static int do_install_files( pkg_db *db, pkg_handle *p, install_state *is ) {
       n = NULL;
       do {
 	descr = NULL;
-	path = rbtree_enum( is->pass_two_dirs, n, &descr_v, &n );
+	path = rbtree_enum( is->pass_three_files, n, &descr_v, &n );
 	if ( path ) {
 	  if ( descr_v ) {
 	    descr = (file_descr *)descr_v;
@@ -812,9 +812,6 @@ static int do_install_one_file( pkg_db *db, pkg_handle *p, install_state *is,
 	      }
 	    }
 
-	    /* Get rid of the temp */
-	    unlink( temp_path );
-
 	    /* Adjust owner/group/mode/mtime */
 	    result = chown( full_path, descr->owner, descr->group );
 	    if ( result != 0 ) {
@@ -860,6 +857,9 @@ static int do_install_one_file( pkg_db *db, pkg_handle *p, install_state *is,
 		     "Error while installing %s\n" );
 	    status = INSTALL_ERROR;
 	  }
+
+	  /* Get rid of the temp */
+	  unlink( temp_path );
 
 	  free( temp_path );
 	}
