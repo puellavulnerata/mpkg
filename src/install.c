@@ -3,11 +3,13 @@
 #include <string.h>
 
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <errno.h>
 #include <grp.h>
 #include <pwd.h>
 #include <unistd.h>
+#include <utime.h>
 
 #include <pkg.h>
 
@@ -108,8 +110,11 @@ static void * copy_symlink_descr( void * );
 static int create_dirs_as_needed( pkg_handle *, const char *, rbtree ** );
 static int do_install_descr( pkg_handle *, install_state * );
 static int do_install_dirs( pkg_db *, pkg_handle *, install_state * );
+static int do_install_files( pkg_db *, pkg_handle *, install_state * );
 static int do_install_one_dir( pkg_db *, pkg_handle *, install_state *, 
 			       char *, dir_descr * );
+static int do_install_one_file( pkg_db *, pkg_handle *, install_state *, 
+				char *, file_descr * );
 static int do_preinst_dirs( pkg_handle *, install_state * );
 static int do_preinst_files( pkg_handle *, install_state * );
 static int do_preinst_one_dir( install_state *, pkg_handle *,
@@ -502,7 +507,7 @@ static int do_install_dirs( pkg_db *db, pkg_handle *p, install_state *is ) {
   void *descr_v;
 
   status = INSTALL_SUCCESS;
-  if ( p && is ) {
+  if ( db && p && is ) {
     if ( is->pass_two_dirs ) {
       n = NULL;
       do {
@@ -528,6 +533,55 @@ static int do_install_dirs( pkg_db *db, pkg_handle *p, install_state *is ) {
       is->pass_two_dirs = NULL;
     }
     /* else nothing to do */
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int do_install_files( pkg_db *db, pkg_handle *p, install_state *is ) {
+  int status, result;
+  rbtree_node *n;
+  char *path;
+  file_descr *descr;
+  void *descr_v;
+
+  status = INSTALL_SUCCESS;
+  if ( db && p && is ) {
+    if ( is->pass_three_files ) {
+      n = NULL;
+      do {
+	descr = NULL;
+	path = rbtree_enum( is->pass_two_dirs, n, &descr_v, &n );
+	if ( path ) {
+	  if ( descr_v ) {
+	    descr = (file_descr *)descr_v;
+	    result = do_install_one_file( db, p, is, path, descr );
+	    if ( result != INSTALL_SUCCESS ) status = result;
+	  }
+	  else {
+	    fprintf( stderr,
+		     "do_install_files() saw path %s but NULL descr\n",
+		     path );
+	    status = INSTALL_ERROR;
+	  }
+	}
+	/* else no nodes left */
+      } while ( n );
+
+      rbtree_free( is->pass_three_files );
+      is->pass_three_files = NULL;
+    }
+    /* else nothing to do */
+
+    /*
+     * We can also get rid of pass_three_dirs, since rollback is no
+     * longer possible anyway at this point.
+     */
+    if ( is->pass_three_dirs ) {
+      rbtree_free( is->pass_three_dirs );
+      is->pass_three_dirs = NULL;
+    }
   }
   else status = INSTALL_ERROR;
 
@@ -634,6 +688,198 @@ static int do_install_one_dir( pkg_db *db, pkg_handle *p, install_state *is,
     }
     else {
       fprintf( stderr, "Error installing directory %s: %s\n",
+	       path, "failed to allocate memory" );
+      status = INSTALL_ERROR;
+    }
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int do_install_one_file( pkg_db *db, pkg_handle *p, install_state *is,
+				char *path, file_descr *descr ) {
+  int status, result, should_clear;
+  char *full_path, *temp_path;
+  struct stat st;
+  struct utimbuf tb;
+
+  status = INSTALL_SUCCESS;
+  if ( db && p && is && path && descr ) {
+    full_path = concatenate_paths( get_root(), path );
+    if ( full_path ) {
+      should_clear = 0;
+      /* First, check if the path already exists */
+      result = lstat( full_path, &st );
+      if ( result == 0 ) {
+	/* lstat() succeeded, check what's there */
+	if ( S_ISREG( st.st_mode ) || S_ISLNK( st.st_mode ) ) {
+	  /* There is an existing regular file or symlink */
+
+	  /*
+	   * Try to remove it; we don't need to remove its pkgdb
+	   * entry, because we will overwrite with an entry for this
+	   * file if we succeed
+	   */
+
+	  result = unlink( full_path );
+	  if ( result != 0 ) {
+	    fprintf( stderr, "Couldn't remove existing %s at %s: %s\n",
+		     ( S_ISREG( st.st_mode ) ) ? "file" : "symlink",
+		     full_path, strerror( errno ) );
+	    status = INSTALL_ERROR;
+	  }
+	  /*
+	   * We removed something, so if we fail later we should clear
+	   * its pkgdb entry.
+	   */
+	  else should_clear = 1;
+	}
+	else if ( S_ISDIR( st.st_mode ) ) {
+	  /* There is an existing directory */
+
+	  /* For now, this is an error */
+
+	  fprintf( stderr,
+		   "There was a directory present at %s while trying to install\n",
+		   full_path );
+	  status = INSTALL_ERROR;
+	}
+	else {
+	  /* Something else */
+
+	  /* This is an error */
+
+	  fprintf( stderr,
+		   "Some other filesystem object (st_mode = %o) was present at %s\n",
+		   st.st_mode, full_path );
+	  status = INSTALL_ERROR;
+	}
+      }
+      else {
+	/*
+	 * lstat() failed, did it fail because the path did not exist,
+	 * or some other problematic reason?
+	 */
+
+	if ( errno != ENOENT ) {
+	  /* Something else, this is an error */
+
+	  fprintf( stderr, "Couldn't lstat() %s: %s\n",
+		   full_path, strerror( errno ) );
+	  status = INSTALL_ERROR;
+	}
+      }
+
+      if ( status == INSTALL_SUCCESS ) {
+	/* We're okay so far, and we know the target path is clear */
+
+	temp_path = concatenate_paths( get_root(), descr->temp_file );
+	if ( temp_path ) {
+	  result = link_or_copy( full_path, temp_path );
+	  if ( result == LINK_OR_COPY_SUCCESS ) {
+	    /* Okay, we've got it in place */
+
+	    /*
+	     * If we had an old package install under this name, we
+	     * need to record this for pass eight.
+	     */
+
+	    if ( is->old_descr ) {
+	      /* If we're claiming, we need to record this for pass eight */
+
+	      if ( !(is->pass_eight_names_installed) ) {
+		is->pass_eight_names_installed =
+		  rbtree_alloc( rbtree_string_comparator,
+				rbtree_string_copier,
+				rbtree_string_free,
+				NULL, NULL );
+	      }
+	  
+	      if ( is->pass_eight_names_installed ) {
+		result = rbtree_insert( is->pass_eight_names_installed,
+					path, NULL );
+		if ( result != RBTREE_SUCCESS ) {
+		  fprintf( stderr,
+			   "Warning: couldn't record %s as installed for the finalization pass!\n",
+			   full_path );
+		}
+	      }
+	      else {
+		fprintf( stderr,
+			 "Warning: couldn't allocate rbtree to record %s as installed for the finalization pass!\n",
+			 full_path );
+	      }
+	    }
+
+	    /* Get rid of the temp */
+	    unlink( temp_path );
+
+	    /* Adjust owner/group/mode/mtime */
+	    result = chown( full_path, descr->owner, descr->group );
+	    if ( result != 0 ) {
+	      fprintf( stderr, "Warning: couldn't chown %s: %s\n",
+		       full_path, strerror( errno ) );
+	    }
+
+	    result = chmod( full_path, descr->mode );
+	    if ( result != 0 ) {
+	      fprintf( stderr, "Warning: couldn't chmod %s: %s\n",
+		       full_path, strerror( errno ) );
+	    }
+
+	    tb.actime = descr->mtime;
+	    tb.modtime = descr->mtime;
+	    result = utime( full_path, &tb );
+	    if ( result != 0 ) {
+	      fprintf( stderr, "Warning: couldn't utime %s: %s\n",
+		       full_path, strerror( errno ) );
+	    }
+
+	    /* Claim it */
+	    result = insert_into_pkg_db( db, path, p->descr->hdr.pkg_name );
+	    if ( result == 0 ) {
+	      printf( "IF %s\n", full_path );
+	    }
+	    else {
+	      fprintf( stderr, "Warning: couldn't claim %s for %s\n",
+		       path, p->descr->hdr.pkg_name );
+	    }
+	  }
+	  else if ( result == LINK_OR_COPY_OUT_OF_DISK ) {
+	    fprintf( stderr,
+		     "Out of disk space while installing %s\n",
+		     full_path );
+	    status = INSTALL_OUT_OF_DISK;
+	    /* Unlink any partial copy */
+	    unlink( full_path );
+	    should_clear = 1;
+	  }
+	  else {
+	    fprintf( stderr,
+		     "Error while installing %s\n" );
+	    status = INSTALL_ERROR;
+	  }
+
+	  free( temp_path );
+	}
+	else {
+	  fprintf( stderr, "Error installing file %s: %s\n",
+		   path, "failed to allocate memory" );
+	  status = INSTALL_ERROR;
+	}
+      }
+
+      if ( status != INSTALL_SUCCESS && should_clear ) {
+	/* Clear out the existing pkgdb entry */
+
+	delete_from_pkg_db( db, path );
+      }
+
+      free( full_path );
+    }
+    else {
+      fprintf( stderr, "Error installing file %s: %s\n",
 	       path, "failed to allocate memory" );
       status = INSTALL_ERROR;
     }
@@ -1354,12 +1600,11 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
    * 6.) Iterate through the list of temporaries we create in pass
    * three.  For each one, test if something already exists in with
    * the name we are installing to.  If something does exist, check if
-   * it is a directory.  If not, unlink it.  If so, recurse down it
-   * and remove its contents, making sure to also remove entries from
-   * the package db.  Now that the installation path is clear, link
-   * the temporary to the new name, and then unlink the temporary.
-   * Assert ownership of this path in the package db.  Create and/or
-   * update a list of pathnames installed for use in pass eight.
+   * it is a directory.  If not, unlink it.  If so, declare an
+   * error. Now that the installation path is clear, link the
+   * temporary to the new name, and then unlink the temporary.  Assert
+   * ownership of this path in the package db.  Create and/or update a
+   * list of pathnames installed for use in pass eight.
    *
    * 7.) Iterate through the list of renames from pass 4, removing
    * them and their package db entries as needed.  Iterate through the
@@ -1425,7 +1670,11 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
       status = do_install_dirs( db, p, is );
       if ( status != INSTALL_SUCCESS ) goto install_done;
 
-      /* TODO - Passes six through nine */
+      /* Pass six */
+      status = do_install_files( db, p, is );
+      if ( status != INSTALL_SUCCESS ) goto install_done;
+
+      /* TODO - Passes seven through nine */
 
       goto install_done;
 
