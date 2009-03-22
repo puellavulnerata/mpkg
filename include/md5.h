@@ -29,6 +29,7 @@ typedef struct {
 } md5_state;
 
 void close_md5( md5_state * );
+int file_hash_matches( const char *, uint8_t * );
 int get_md5_result( md5_state *, uint8_t * );
 write_stream * get_md5_ws( md5_state * );
 md5_state * start_new_md5( void );
