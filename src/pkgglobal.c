@@ -6,6 +6,8 @@
 
 #include <pkg.h>
 
+static int check_md5;
+
 static char *pkg = NULL;
 static char *root = NULL;
 static char *temp = NULL;
@@ -51,6 +53,11 @@ void free_pkg_globals( void ) {
 }
 
 void init_pkg_globals( void ) {
+#ifdef CHECK_MD5_DEFAULT
+  check_md5 = 1;
+#else
+  check_md5 = 0;
+#endif
   pkg = DEFAULT_PKG_STRING;
   root = DEFAULT_ROOT_STRING;
   temp = DEFAULT_TEMP_STRING;
@@ -112,6 +119,15 @@ int sanity_check_globals( void ) {
   }
 
   return status;
+}
+
+int get_check_md5( void ) {
+  return check_md5;
+}
+
+void set_check_md5( int v ) {
+  if ( v ) check_md5 = 1;
+  else check_md5 = 0;
 }
 
 const char * get_pkg( void ) {

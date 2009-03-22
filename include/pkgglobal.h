@@ -9,6 +9,9 @@ void free_pkg_globals( void );
 void init_pkg_globals( void );
 int sanity_check_globals( void );
 
+int get_check_md5( void );
+void set_check_md5( int );
+
 const char * get_pkg( void );
 void set_pkg( const char * );
 

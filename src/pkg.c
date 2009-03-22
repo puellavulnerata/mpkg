@@ -66,6 +66,12 @@ int main( int argc, char **argv, char **envp ) {
 	  break;
 	}
       }
+      else if ( strcmp( curr, "--enable-md5" ) == 0 ) {
+	set_check_md5( 1 );
+      }
+      else if ( strcmp( curr, "--disable-md5" ) == 0 ) {
+	set_check_md5( 0 );
+      }
       else {
 	fprintf( stderr, "Unknown option %s\n", curr );
 	error = 4;
