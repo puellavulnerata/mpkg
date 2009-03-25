@@ -518,6 +518,76 @@ int parse_strings_from_line( char *line, char ***strings_out ) {
 }
 
 /*
+ * int path_comparator( void *left, void *right );
+ *
+ * Path comparator for rbtrees which sorts paths ahead of their prefixes
+ */
+
+int path_comparator( void *left, void *right ) {
+  char *ls, *rs;
+  char *lcmp, *rcmp, *ltmp, *rtmp;
+  int result, temp;
+
+  ls = (char *)left;
+  rs = (char *)rs;
+  if ( ls && rs ) {
+    lcmp = get_path_component( ls, &ltmp );
+    rcmp = get_path_component( rs, &rtmp );
+    while ( 1 ) {
+      if ( lcmp && rcmp ) {
+	temp = strcmp( lcmp, rcmp );
+	if ( temp > 0 ) {
+	  /*
+	   * rcmp is alphabetically prior to lcmp in the first
+	   * component after a common prefix, so rs sorts first.
+	   */
+	  result = 1;
+	  break;
+	}
+	else if ( temp < 0 ) {
+	  /* As above, but ls sorts first. */
+	  result = -1;
+	  break;
+	}
+	else {
+	  /* These components match; get the next ones */
+	  lcmp = get_path_component( NULL, &ltmp );
+	  rcmp = get_path_component( NULL, &rtmp );
+	}
+      }
+      else {
+	/* We ran out of data on at least one */
+	if ( lcmp ) {
+	  /*
+	   * We still have a left component, but no right component,
+	   * so ls is a prefix of rs, and rs sorts first.
+	   */
+	  result = 1;
+	}
+	else if ( rcmp ) {
+	  /* As above, but rs is a prefix of ls */
+	  result = -1;
+	}
+	else {
+	  /* We finished both simultaneously; they must be identical */
+	  result = 0;
+	}
+
+	/* We're done */
+	break;
+      }
+    }
+  }
+  else {
+    if ( !ls && rs ) result = 1; /* NULL is a prefix of everything */
+    else if ( ls && !rs ) result = -1;
+    else result = 0;
+  }
+
+  return result;
+}
+
+/*
  * char * read_line_from_file( FILE *fp );
  *
  * Read one line from a file into a newly allocated block of memory.

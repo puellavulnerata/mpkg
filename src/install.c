@@ -131,6 +131,10 @@ static void free_dir_descr( void * );
 static void free_file_descr( void * );
 static void free_install_state( install_state * );
 static void free_symlink_descr( void * );
+static int handle_dir_replace( pkg_db *, pkg_descr_entry * );
+static int handle_file_replace( pkg_db *, pkg_descr *, pkg_descr_entry * );
+static int handle_replace( pkg_db *, pkg_handle *, install_state * );
+static int handle_symlink_replace( pkg_db *, pkg_descr_entry * );
 static int install_pkg( pkg_db *, pkg_handle * );
 static int rollback_dir_set( rbtree ** );
 static int rollback_file_set( rbtree ** );
@@ -1776,6 +1780,435 @@ static void free_symlink_descr( void *sv ) {
   }
 }
 
+static int handle_dir_replace( pkg_db *db, pkg_descr_entry *e ) {
+  char *full_path;
+  int status, result;
+  struct stat buf;
+
+  status = INSTALL_SUCCESS;
+  if ( db && e && e->type == ENTRY_DIRECTORY ) {
+    full_path = concatenate_paths( get_root(), e->filename );
+    if ( full_path ) {
+      result = lstat( full_path, &buf );
+      if ( result == 0 ) {
+	/* Successful lstat(), check type */
+	if ( S_ISDIR( buf.st_mode ) ) {
+	  /* try to rmdir() it, and check for ENOTEMPTY */
+	  result = rmdir( full_path );
+	  if ( result == 0 ) {
+	    /* We got it */
+	    printf( "RD %s\n", full_path );
+	  }
+	  else {
+	    /* rmdir() failed */
+	    /* POSIX allows ENOTEMPTY or EEXIST */
+	    if ( errno != ENOTEMPTY && errno != EEXIST ) {
+	      fprintf( stderr,
+		       "Warning: couldn't rmdir() %s: %s\n",
+		       full_path, strerror( errno ) );
+	      status = INSTALL_ERROR;
+	    }
+	    /*
+	     * else it wasn't empty, and we didn't really want to
+	     * remove it anyway
+	     */
+	  }
+	}
+	/* else the thing at that path is not a directory, so nothing to do */
+      }
+      else {
+	/* Failed lstat().  Was is because it was absent? */
+	if ( errno != ENOENT ) {
+	  /* Failed lstat(), throw a warning */
+	  fprintf( stderr,
+		   "Warning: couldn't lstat() old directory %s: %s\n",
+		   e->filename, strerror( errno ) );
+	  status = INSTALL_ERROR;
+	}
+	/* else nothing to do; it didn't exist */
+      }
+      free( full_path );
+    }
+    else {
+      fprintf( stderr,
+	       "Warning: out of memory testing old directory %s for removal.\n",
+	       e->filename );
+      status = INSTALL_ERROR;
+    }
+
+    /* In any case, we can remove the pkgdb entry */
+    result = delete_from_pkg_db( db, e->filename );
+    if ( result != 0 ) {
+      fprintf( stderr,
+	       "Warning: failed to remove pkgdb entry for old directory %s\n",
+	       e->filename );
+      status = INSTALL_ERROR;
+    }
+  }
+  else {
+    fprintf( stderr,
+	     "Warning: internal error in handle_dir_replace()\n" );
+    status = INSTALL_ERROR;
+  }
+
+  return status;
+}
+
+static int handle_file_replace( pkg_db *db, pkg_descr *old_p,
+				pkg_descr_entry *e ) {
+  char *full_path;
+  int status, result;
+  struct stat buf;
+
+  status = INSTALL_SUCCESS;
+  if ( db && old_p && e && e->type == ENTRY_FILE ) {
+    full_path = concatenate_paths( get_root(), e->filename );
+    if ( full_path ) {
+      result = lstat( full_path, &buf );
+      if ( result == 0 ) {
+	/* Successful lstat(), check type */
+	if ( S_ISREG( buf.st_mode ) ) {
+	  /* Check if the file has been modified */
+	  if ( buf.st_mtime == old_p->hdr.pkg_time ) {
+	    if ( get_check_md5() ) {
+	      result = file_hash_matches( full_path, e->u.f.hash );
+	      if ( result == 1 ) {
+		/* Hash match; remove it */
+		printf( "RF %s\n", full_path );
+		unlink( full_path );
+	      }
+	      /* if result == 0, no match, so leave it */
+	      else if ( result != 0 ) {
+		/* Error checking */
+		fprintf( stderr,
+			 "Warning: couldn't check MD5 of old file %s\n",
+			 full_path );
+	      }
+	    }
+	    else {
+	      /* No MD5 check; go ahead and unlink it */
+	      printf( "RF %s\n", full_path );
+	      unlink( full_path );
+	    }
+	  }
+	  /* else mtimes don't match; leave it */
+	}
+	/* else the thing at that path was not a file, so nothing to do */
+      }
+      else {
+	/* Failed lstat().  Was is because it was absent? */
+	if ( errno != ENOENT ) {
+	  /* Failed lstat(), throw a warning */
+	  fprintf( stderr,
+		   "Warning: couldn't lstat() old file %s: %s\n",
+		   e->filename, strerror( errno ) );
+	  status = INSTALL_ERROR;
+	}
+	/* else nothing to do; it didn't exist */
+      }
+      free( full_path );
+    }
+    else {
+      fprintf( stderr,
+	       "Warning: out of memory testing old file %s for removal.\n",
+	       e->filename );
+      status = INSTALL_ERROR;
+    }
+
+    /* In any case, we can remove the pkgdb entry */
+    result = delete_from_pkg_db( db, e->filename );
+    if ( result != 0 ) {
+      fprintf( stderr,
+	       "Warning: failed to remove pkgdb entry for old file %s\n",
+	       e->filename );
+      status = INSTALL_ERROR;
+    }
+  }
+  else {
+    fprintf( stderr,
+	     "Warning: internal error in handle_file_replace()\n" );
+    status = INSTALL_ERROR;
+  }
+
+  return status;
+}
+
+static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
+  int status, result, i, need_to_remove, has_pkg_db;
+  pkg_descr *old;
+  pkg_descr_entry *e;
+  rbtree *dirs_to_handle, *others_to_handle;
+  rbtree_node *n;
+  char *temp, *path;
+  void *e_v;
+
+  status = INSTALL_SUCCESS;
+  if ( db && p && is ) {
+    /* Check if we have an old install under the same name to handle */
+    if ( is->old_descr ) {
+      /* Load it */
+      old = read_pkg_descr_from_file( is->old_descr );
+      if ( old ) {
+	others_to_handle = rbtree_alloc( rbtree_string_comparator,
+					 NULL, NULL, NULL, NULL );
+	/* Use path_comparator for directories, so subdirectories will be processed ahead of their parents */
+	dirs_to_handle = rbtree_alloc( path_comparator,
+				       NULL, NULL, NULL, NULL );
+
+	if ( dirs_to_handle && others_to_handle ) {
+	  for ( i = 0; i < old->num_entries; ++i ) {
+	    e = &(old->entries[i]);
+	    /* Check if it's in the list of things we installed earlier, and if it still has a pkgdb entry */
+	    temp = query_pkg_db( db, e->filename );
+	    if ( temp ) {
+	      has_pkg_db = 1;
+	      free( temp );
+	    }
+	    else has_pkg_db = 0;
+
+	    if ( has_pkg_db ) {
+	      if ( is->pass_eight_names_installed ) {
+		result = rbtree_query( is->pass_eight_names_installed,
+				       e->filename, NULL );
+		/* We remove it if it was not installed in the new package */
+		if ( result == RBTREE_NOT_FOUND ) need_to_remove = 1;
+		else need_to_remove = 0;
+	      }
+	      /*
+	       * else we installed an empty package, so everything is
+	       * need-to-remove.
+	       */
+	      else need_to_remove = 1;
+	    }
+	    /* else the old package no longer claimed it */
+	    else need_to_remove = 0;
+
+	    if ( need_to_remove ) {
+	      /* Queue for removal in the appropriate rbtree */
+	      switch ( e->type ) {
+	      case ENTRY_DIRECTORY:
+		result = rbtree_insert( dirs_to_handle, e->filename, e );
+		if ( result != RBTREE_SUCCESS ) {
+		  fprintf( stderr,
+			   "Warning: error while trying to queue old directory %s from %s.\n",
+			   e->filename, old->hdr.pkg_name );
+		}
+		break;
+	      case ENTRY_FILE:
+		result = rbtree_insert( others_to_handle, e->filename, e );
+		if ( result != RBTREE_SUCCESS ) {
+		  fprintf( stderr,
+			   "Warning: error while trying to queue old file %s from %s.\n",
+			   e->filename, old->hdr.pkg_name );
+		}
+		break;
+	      case ENTRY_SYMLINK:
+		result = rbtree_insert( others_to_handle, e->filename, e );
+		if ( result != RBTREE_SUCCESS ) {
+		  fprintf( stderr,
+			   "Warning: error while trying to queue old symlink %s from %s.\n",
+			   e->filename, old->hdr.pkg_name );
+		}
+		break;
+	      case ENTRY_LAST:
+		/* Ignore */
+		break;
+	      default:
+		/* Warn and ignore */
+		fprintf( stderr,
+			 "Warning: unknown entry type %d for %s in old package description for %s.\n",
+			 e->type, e->filename, p->descr->hdr.pkg_name );
+	      }
+	    }
+	  }
+
+	  /* Now handle the removals by enumerating the trees; first files and symlinks, then directories. */
+	  n = NULL;
+	  do {
+	    e = NULL;
+	    path = rbtree_enum( others_to_handle, n, &e_v, &n );
+	    if ( path ) {
+	      if ( e_v ) {
+		e = (pkg_descr_entry *)e_v;
+		if ( e->type == ENTRY_FILE ) {
+		  result = handle_file_replace( db, old, e );
+		  if ( result != INSTALL_SUCCESS ) {
+		    fprintf( stderr,
+			     "Warning: error removing file %s for %s\n",
+			     path, p->descr->hdr.pkg_name );
+		  }
+		}
+		else if ( e->type == ENTRY_SYMLINK ) {
+		  result = handle_symlink_replace( db, e );
+		  if ( result != INSTALL_SUCCESS ) {
+		    fprintf( stderr,
+			     "Warning: error removing symlink %s for %s\n",
+			     path, p->descr->hdr.pkg_name );
+		  }
+		}
+		else {
+		  fprintf( stderr,
+			   "Warning: while removing files and symlinks, saw other entry type for %s (in %s)\n",
+			   path, p->descr->hdr.pkg_name );
+		  /* Skip it */
+		}
+	      }
+	      else {
+		fprintf( stderr,
+			 "Warning: NULL entry at filename %s while enumerating files and symlinks to remove (in %s)\n",
+			 path, p->descr->hdr.pkg_name );
+		/* Skip it */
+	      }
+	    }
+	    /* else we're done */
+	  } while ( n != NULL );
+
+	  /* Now the directories */
+	  n = NULL;
+	  do {
+	    e = NULL;
+	    path = rbtree_enum( dirs_to_handle, n, &e_v, &n );
+	    if ( path ) {
+	      if ( e_v ) {
+		e = (pkg_descr_entry *)e_v;
+		if ( e->type == ENTRY_DIRECTORY ) {
+		  result = handle_dir_replace( db, e );
+		  if ( result != INSTALL_SUCCESS ) {
+		    fprintf( stderr,
+			     "Warning: error removing directory %s for %s\n",
+			     path, p->descr->hdr.pkg_name );
+		  }
+		}
+		else {
+		  fprintf( stderr,
+			   "Warning: while removing directories, saw non-directory entry type for %s (in %s)\n",
+			   path, p->descr->hdr.pkg_name );
+		  /* Skip it */
+		}
+	      }
+	      else {
+		fprintf( stderr,
+			 "Warning: NULL entry at filename %s while enumerating directories to remove (in %s)\n",
+			 path, p->descr->hdr.pkg_name );
+		/* Skip it */
+	      }
+	    }
+	    /* else we're done */
+	  } while ( n != NULL );
+
+	  /* Free the rbtrees */
+	  rbtree_free( dirs_to_handle );
+	  rbtree_free( others_to_handle );
+	}
+	else {
+	  fprintf( stderr,
+		   "Warning: couldn't allocate rbtrees trying to remove old package %s\n",
+		   p->descr->hdr.pkg_name );
+	  if ( dirs_to_handle ) rbtree_free( dirs_to_handle );
+	  if ( others_to_handle ) rbtree_free( others_to_handle );
+	  /* Skip it */
+	}
+
+	/* Free the in-memory package description data */
+	free_pkg_descr( old );
+      }
+      else {
+	fprintf( stderr,
+		 "Warning: couldn't read old package description for %s from %s\n",
+		 p->descr->hdr.pkg_name, is->old_descr );
+	/* Skip it, leaving old files still installed, if this happens */
+      }
+      /* Delete & free the old description */
+      unlink( is->old_descr );
+      free( is->old_descr );
+      is->old_descr = NULL;
+      /* Free the rbtree */
+      if ( is->pass_eight_names_installed ) {
+	rbtree_free( is->pass_eight_names_installed );
+	is->pass_eight_names_installed = NULL;
+      }
+    }
+    /* else nothing to do */    
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
+
+static int handle_symlink_replace( pkg_db *db, pkg_descr_entry *e ) {
+  char *full_path, *target;
+  int status, result;
+  struct stat buf;
+
+  status = INSTALL_SUCCESS;
+  if ( db && e && e->type == ENTRY_SYMLINK ) {
+    full_path = concatenate_paths( get_root(), e->filename );
+    if ( full_path ) {
+      result = lstat( full_path, &buf );
+      if ( result == 0 ) {
+	/* Successful lstat(), check type and link target */
+	if ( S_ISLNK( buf.st_mode ) ) {
+	  /*
+	   * If it is a symlink, we delete it if it is unmodified.  We
+	   * need to compare the link targets.
+	   */
+	  target = NULL;
+	  result = read_symlink_target( full_path, &target );
+	  if ( result == READ_SYMLINK_SUCCESS ) {
+	    if ( strcmp( target, e->u.s.target ) == 0 ) {
+	      /* They match, delete the existing symlink */
+	      printf( "RS %s\n", full_path );
+	      unlink( full_path );
+	    }
+	    free( target );
+	  }
+	  else {
+	    fprintf( stderr,
+		     "Warning: unable to read target of existing symlink %s\n",
+		     full_path );
+	    status = INSTALL_ERROR;
+	  }
+	}
+	/* else the thing at that path was not a symlink, so nothing to do */
+      }
+      else {
+	/* Failed lstat().  Was is because it was absent? */
+	if ( errno != ENOENT ) {
+	  /* Failed lstat(), throw a warning */
+	  fprintf( stderr,
+		   "Warning: couldn't lstat() old symlink %s: %s\n",
+		   e->filename, strerror( errno ) );
+	  status = INSTALL_ERROR;
+	}
+	/* else nothing to do; it didn't exist */
+      }
+      free( full_path );
+    }
+    else {
+      fprintf( stderr,
+	       "Warning: out of memory testing old symlink %s for removal.\n",
+	       e->filename );
+      status = INSTALL_ERROR;
+    }
+
+    /* In any case, we can remove the pkgdb entry */
+    result = delete_from_pkg_db( db, e->filename );
+    if ( result != 0 ) {
+      fprintf( stderr,
+	       "Warning: failed to remove pkgdb entry for old symlink %s\n",
+	       e->filename );
+      status = INSTALL_ERROR;
+    }
+  }
+  else {
+    fprintf( stderr,
+	     "Warning: internal error in handle_symlink_replace()\n" );
+    status = INSTALL_ERROR;
+  }
+
+  return status;
+}
+
 void install_main( int argc, char **argv ) {
   pkg_db *db;
   int i, status;
@@ -1946,7 +2379,10 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
       status = do_install_symlinks( db, p, is );
       if ( status != INSTALL_SUCCESS ) goto install_done;
 
-      /* TODO - Passes eight and nine */
+      status = handle_replace( db, p, is );
+      if ( status != INSTALL_SUCCESS ) goto install_done;
+
+      /* TODO - Pass nine */
 
       goto install_done;
 
