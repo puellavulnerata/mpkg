@@ -46,12 +46,15 @@ static pkg_handle_builder * alloc_pkg_handle_builder( void ) {
   b = malloc( sizeof( *b ) );
   if ( b ) {
     b->p = NULL;
-    b->cksums = rbtree_alloc( rbtree_string_comparator,
-			      rbtree_string_copier,
-			      rbtree_string_free,
-			      cksum_copier,
-			      cksum_free );
-    if ( b->cksums ) {
+    if ( get_check_md5() ) {
+      b->cksums = rbtree_alloc( rbtree_string_comparator,
+				rbtree_string_copier,
+				rbtree_string_free,
+				cksum_copier,
+				cksum_free );
+    }
+    else b->cksums = NULL;
+    if ( !get_check_md5() || b->cksums ) {
       b->p = malloc( sizeof( *(b->p) ) );
       if ( b->p ) {
 	b->p->descr = NULL;
@@ -296,9 +299,17 @@ static int handle_file( pkg_handle_builder *b, tar_file_info *tinf,
   result = 0;
   if ( b && tinf && rs ) {
     if ( tinf->type == TAR_FILE ) {
-      md5 = start_new_md5();
-      if ( md5 ) {
-	md5_ws = get_md5_ws( md5 );
+      if ( get_check_md5() ) {
+	md5 = start_new_md5();
+	if ( md5 ) md5_ws = get_md5_ws( md5 );
+	else md5_ws = NULL;
+      }
+      else {
+	md5 = NULL;
+	md5_ws = NULL;
+      }
+
+      if ( !get_check_md5() || md5 ) {
 	tmp = concatenate_paths( b->p->unpacked_dir, "package-content" );
 	if ( tmp ) {
 	  dst = concatenate_paths( tmp, tinf->filename );
@@ -312,10 +323,12 @@ static int handle_file( pkg_handle_builder *b, tar_file_info *tinf,
 		error = 0;
 		while ( ( len =
 			  read_from_stream( rs, buf, UNPACK_BUF_LEN ) ) > 0 ) {
-		  wlen = write_to_stream( md5_ws, buf, len );
-		  if ( wlen != len ) {
-		    error = 1;
-		    break;
+		  if ( md5_ws ) {
+		    wlen = write_to_stream( md5_ws, buf, len );
+		    if ( wlen != len ) {
+		      error = 1;
+		      break;
+		    }
 		  }
 		  wlen = write_to_stream( ws, buf, len );
 		  if ( wlen != len ) {
@@ -325,25 +338,27 @@ static int handle_file( pkg_handle_builder *b, tar_file_info *tinf,
 		}
 		if ( len == 0 && !error ) {
 		  close_write_stream( ws );
-		  close_write_stream( md5_ws );
-		  status = get_md5_result( md5, cksum );
-		  if ( status == 0 ) {
-		    tmp = concatenate_paths( "/", tinf->filename );
-		    if ( tmp ) {
-		      status = rbtree_insert_no_overwrite( b->cksums,
-							   tmp, cksum );
-		      free( tmp );
-		      if ( status != RBTREE_SUCCESS ) result = -11;
+		  if ( md5_ws ) close_write_stream( md5_ws );
+		  if ( md5 ) {
+		    status = get_md5_result( md5, cksum );
+		    if ( status == 0 ) {
+		      tmp = concatenate_paths( "/", tinf->filename );
+		      if ( tmp ) {
+			status = rbtree_insert_no_overwrite( b->cksums,
+							     tmp, cksum );
+			free( tmp );
+			if ( status != RBTREE_SUCCESS ) result = -11;
+		      }
+		      else result = -10;
 		    }
-		    else result = -10;
+		    else result = -9;
 		  }
-		  else result = -9;
 		}
 		else {
 		  /* Error reading or writing */
 
 		  close_write_stream( ws );
-		  close_write_stream( md5_ws );
+		  if ( md5_ws ) close_write_stream( md5_ws );
 		  result = -8;
 		}
 	      }
@@ -355,7 +370,7 @@ static int handle_file( pkg_handle_builder *b, tar_file_info *tinf,
 	}
 	else result = -4;
 
-	close_md5( md5 );
+	if ( md5 ) close_md5( md5 );
       }
       else result = -3;
     }
@@ -625,7 +640,7 @@ static pkg_handle * open_pkg_file_v1_stream( read_stream *rs ) {
 	  }
 	}
 	if ( status != TAR_NO_MORE_FILES ) error = 1;
-	else {
+	else if ( get_check_md5() ) {
 	  status = check_cksums( b );
 	  if ( status != 0 ) error = 1;
 	}
@@ -753,7 +768,7 @@ static pkg_handle * open_pkg_file_v2_stream( read_stream *rs ) {
 
 	if ( got_content && got_descr ) {
 	  if ( status != TAR_NO_MORE_FILES ) error = 1;
-	  else {
+	  else if ( get_check_md5() ) {
 	    status = check_cksums( b );
 	    if ( status != 0 ) error = 1;
 	  }
