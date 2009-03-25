@@ -103,6 +103,7 @@ typedef struct {
   rbtree *pass_nine_dirs_to_process;
 } install_state;
 
+static int adjust_dir_mtimes( pkg_db *, pkg_handle *, install_state * );
 static install_state * alloc_install_state( void );
 static void * copy_dir_descr( void * );
 static void * copy_file_descr( void * );
@@ -143,6 +144,61 @@ static int rollback_preinst_dirs( pkg_handle *, install_state * );
 static int rollback_preinst_files( pkg_handle *, install_state * );
 static int rollback_preinst_symlinks( pkg_handle *, install_state * );
 static int rollback_symlink_set( rbtree ** );
+
+static int adjust_dir_mtimes( pkg_db *db, pkg_handle *p, install_state *is ) {
+  int status, result;
+  rbtree_node *n;
+  char *path, *full_path;
+  dir_descr *descr;
+  void *descr_v;
+  struct utimbuf tb;
+
+  status = INSTALL_SUCCESS;
+  if ( db && p && is ) {
+    if ( is->pass_nine_dirs_to_process ) {
+      n = NULL;
+      do {
+	descr = NULL;
+	path = rbtree_enum( is->pass_nine_dirs_to_process, n, &descr_v, &n );
+	if ( path ) {
+	  if ( descr_v ) {
+	    descr = (dir_descr *)descr_v;
+	    full_path = concatenate_paths( get_root(), path );
+	    if ( full_path ) {
+	      tb.actime = descr->mtime;
+	      tb.modtime = descr->mtime;
+	      result = utime( full_path, &tb );
+	      if ( result != 0 ) {
+		fprintf( stderr, "Warning: couldn't utime %s: %s\n",
+			 full_path, strerror( errno ) );
+	      }
+	      free( full_path );
+	    }
+	    else {
+	      fprintf( stderr,
+		       "Warning: adjust_dir_mtimes() couldn't alloc for %s\n",
+		       path );
+	    }
+	  }
+	  else {
+	    fprintf( stderr,
+		     "adjust_dir_mtimes() saw path %s but NULL descr\n",
+		     path );
+	  }
+	}
+	/* else nothing else to process */
+      } while ( n );
+
+      /* Free the rbtree */
+      rbtree_free( is->pass_nine_dirs_to_process );
+      is->pass_nine_dirs_to_process = NULL;
+    }
+    /* else nothing to do */
+  }
+  else status = INSTALL_ERROR;
+
+  return status;
+}
 
 static install_state * alloc_install_state( void ) {
   install_state *is;
@@ -2382,7 +2438,7 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
       status = handle_replace( db, p, is );
       if ( status != INSTALL_SUCCESS ) goto install_done;
 
-      /* TODO - Pass nine */
+      status = adjust_dir_mtimes( db, p, is );
 
       goto install_done;
 
