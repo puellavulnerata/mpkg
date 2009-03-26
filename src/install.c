@@ -502,14 +502,22 @@ static int do_install_descr( pkg_handle *p,
 	  temp_name = rename_to_temp( pkg_name );
 	  if ( temp_name ) {
 	    is->old_descr = concatenate_paths( get_pkg(), temp_name );
-	    if ( !(is->old_descr) ) {
-	      unlink( temp_name );
+	    if ( is->old_descr ) {
 	      free( temp_name );
 	      temp_name = NULL;
 	    }
-	  }
+	    else {
+	      unlink( temp_name );
+	      free( temp_name );
+	      temp_name = NULL;
 
-	  if ( !temp_name ) {
+	      fprintf( stderr,
+		       "Couldn't move an existing file %s/%s\n",
+		       get_pkg(), pkg_name );
+	      status = INSTALL_ERROR;
+	    }
+	  }
+	  else {
 	    /* Failed to rename it */
 	    
 	    fprintf( stderr,
