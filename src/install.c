@@ -500,8 +500,16 @@ static int do_install_descr( pkg_handle *p,
 
 	if ( S_ISREG( stat_buf.st_mode ) ) {
 	  temp_name = rename_to_temp( pkg_name );
-	  if ( temp_name ) is->old_descr = temp_name;
-	  else {
+	  if ( temp_name ) {
+	    is->old_descr = concatenate_paths( get_pkg(), temp_name );
+	    if ( !(is->old_descr) ) {
+	      unlink( temp_name );
+	      free( temp_name );
+	      temp_name = NULL;
+	    }
+	  }
+
+	  if ( !temp_name ) {
 	    /* Failed to rename it */
 	    
 	    fprintf( stderr,
@@ -1789,8 +1797,11 @@ static void free_file_descr( void *fv ) {
 }
 
 static void free_install_state( install_state *is ) {
+  char *temp;
   if ( is ) {
     if ( is->old_descr ) {
+      /* unlink it if it still exists */
+      unlink( is->old_descr );
       free( is->old_descr );
       is->old_descr = NULL;
     }
@@ -2007,14 +2018,20 @@ static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
       if ( old ) {
 	others_to_handle = rbtree_alloc( rbtree_string_comparator,
 					 NULL, NULL, NULL, NULL );
-	/* Use path_comparator for directories, so subdirectories will be processed ahead of their parents */
+	/*
+	 * Use path_comparator for directories, so subdirectories
+	 * will be processed ahead of their parents
+	 */
 	dirs_to_handle = rbtree_alloc( path_comparator,
 				       NULL, NULL, NULL, NULL );
 
 	if ( dirs_to_handle && others_to_handle ) {
 	  for ( i = 0; i < old->num_entries; ++i ) {
 	    e = &(old->entries[i]);
-	    /* Check if it's in the list of things we installed earlier, and if it still has a pkgdb entry */
+	    /*
+	     * Check if it's in the list of things we installed
+	     * earlier, and if it still has a pkgdb entry
+	     */
 	    temp = query_pkg_db( db, e->filename );
 	    if ( temp ) {
 	      has_pkg_db = 1;
@@ -2078,7 +2095,10 @@ static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
 	    }
 	  }
 
-	  /* Now handle the removals by enumerating the trees; first files and symlinks, then directories. */
+	  /*
+	   * Now handle the removals by enumerating the trees; first
+	   * files and symlinks, then directories.
+	   */
 	  n = NULL;
 	  do {
 	    e = NULL;
@@ -2174,10 +2194,12 @@ static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
 		 p->descr->hdr.pkg_name, is->old_descr );
 	/* Skip it, leaving old files still installed, if this happens */
       }
+
       /* Delete & free the old description */
       unlink( is->old_descr );
       free( is->old_descr );
       is->old_descr = NULL;
+
       /* Free the rbtree */
       if ( is->pass_eight_names_installed ) {
 	rbtree_free( is->pass_eight_names_installed );
@@ -2435,6 +2457,7 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
       status = do_install_symlinks( db, p, is );
       if ( status != INSTALL_SUCCESS ) goto install_done;
 
+      /* Pass eight */
       status = handle_replace( db, p, is );
       if ( status != INSTALL_SUCCESS ) goto install_done;
 
