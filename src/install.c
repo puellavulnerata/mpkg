@@ -1856,7 +1856,7 @@ static void free_symlink_descr( void *sv ) {
 }
 
 static int handle_dir_replace( pkg_db *db, pkg_descr_entry *e ) {
-  char *full_path;
+  char *full_path, *canonical_path;
   int status, result;
   struct stat buf;
 
@@ -1912,12 +1912,22 @@ static int handle_dir_replace( pkg_db *db, pkg_descr_entry *e ) {
     }
 
     /* In any case, we can remove the pkgdb entry */
-    result = delete_from_pkg_db( db, e->filename );
-    if ( result != 0 ) {
+    canonical_path = canonicalize_and_copy( e->filename );
+    if ( canonical_path ) {
+      result = delete_from_pkg_db( db, canonical_path );
+      if ( result != 0 ) {
+	fprintf( stderr,
+		 "Warning: failed to remove pkgdb entry for old directory %s\n",
+		 canonical_path );
+	status = INSTALL_ERROR;
+      }
+      
+      free( canonical_path );
+    }
+    else {
       fprintf( stderr,
-	       "Warning: failed to remove pkgdb entry for old directory %s\n",
+	       "Warning: error allocating memory while trying to remove pkgdb entry for old directory %s\n",
 	       e->filename );
-      status = INSTALL_ERROR;
     }
   }
   else {
@@ -1931,7 +1941,7 @@ static int handle_dir_replace( pkg_db *db, pkg_descr_entry *e ) {
 
 static int handle_file_replace( pkg_db *db, pkg_descr *old_p,
 				pkg_descr_entry *e ) {
-  char *full_path;
+  char *full_path, *canonical_path;
   int status, result;
   struct stat buf;
 
@@ -1991,12 +2001,22 @@ static int handle_file_replace( pkg_db *db, pkg_descr *old_p,
     }
 
     /* In any case, we can remove the pkgdb entry */
-    result = delete_from_pkg_db( db, e->filename );
-    if ( result != 0 ) {
+    canonical_path = canonicalize_and_copy( e->filename );
+    if ( canonical_path ) {
+      result = delete_from_pkg_db( db, canonical_path );
+      if ( result != 0 ) {
+	fprintf( stderr,
+		 "Warning: failed to remove pkgdb entry for old file %s\n",
+		 canonical_path );
+	status = INSTALL_ERROR;
+      }
+
+      free( canonical_path );
+    }
+    else {
       fprintf( stderr,
-	       "Warning: failed to remove pkgdb entry for old file %s\n",
+	       "Warning: error allocating memory while trying to remove pkgdb entry for old file %s\n",
 	       e->filename );
-      status = INSTALL_ERROR;
     }
   }
   else {
@@ -2014,7 +2034,7 @@ static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
   pkg_descr_entry *e;
   rbtree *dirs_to_handle, *others_to_handle;
   rbtree_node *n;
-  char *temp, *path;
+  char *temp, *path, *canonical_path;
   void *e_v;
 
   status = INSTALL_SUCCESS;
@@ -2036,72 +2056,82 @@ static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
 	if ( dirs_to_handle && others_to_handle ) {
 	  for ( i = 0; i < old->num_entries; ++i ) {
 	    e = &(old->entries[i]);
-	    /*
-	     * Check if it's in the list of things we installed
-	     * earlier, and if it still has a pkgdb entry owned by the
-	     * old install.
-	     */
-	    temp = query_pkg_db( db, e->filename );
-	    if ( temp ) {
-	      if ( strcmp( temp, old->hdr.pkg_name ) == 0 ) has_pkg_db = 1;
-	      else has_pkg_db = 0;
-	      free( temp );
-	    }
-	    else has_pkg_db = 0;
-
-	    if ( has_pkg_db ) {
-	      if ( is->pass_eight_names_installed ) {
-		result = rbtree_query( is->pass_eight_names_installed,
-				       e->filename, NULL );
-		/* We remove it if it was not installed in the new package */
-		if ( result == RBTREE_NOT_FOUND ) need_to_remove = 1;
-		else need_to_remove = 0;
-	      }
+	    canonical_path = canonicalize_and_copy( e->filename );
+	    if ( canonical_path ) {
 	      /*
-	       * else we installed an empty package, so everything is
-	       * need-to-remove.
+	       * Check if it's in the list of things we installed
+	       * earlier, and if it still has a pkgdb entry owned by the
+	       * old install.
 	       */
-	      else need_to_remove = 1;
-	    }
-	    /* else the old package no longer claimed it */
-	    else need_to_remove = 0;
-
-	    if ( need_to_remove ) {
-	      /* Queue for removal in the appropriate rbtree */
-	      switch ( e->type ) {
-	      case ENTRY_DIRECTORY:
-		result = rbtree_insert( dirs_to_handle, e->filename, e );
-		if ( result != RBTREE_SUCCESS ) {
-		  fprintf( stderr,
-			   "Warning: error while trying to queue old directory %s from %s.\n",
-			   e->filename, old->hdr.pkg_name );
-		}
-		break;
-	      case ENTRY_FILE:
-		result = rbtree_insert( others_to_handle, e->filename, e );
-		if ( result != RBTREE_SUCCESS ) {
-		  fprintf( stderr,
-			   "Warning: error while trying to queue old file %s from %s.\n",
-			   e->filename, old->hdr.pkg_name );
-		}
-		break;
-	      case ENTRY_SYMLINK:
-		result = rbtree_insert( others_to_handle, e->filename, e );
-		if ( result != RBTREE_SUCCESS ) {
-		  fprintf( stderr,
-			   "Warning: error while trying to queue old symlink %s from %s.\n",
-			   e->filename, old->hdr.pkg_name );
-		}
-		break;
-	      case ENTRY_LAST:
-		/* Ignore */
-		break;
-	      default:
-		/* Warn and ignore */
-		fprintf( stderr,
-			 "Warning: unknown entry type %d for %s in old package description for %s.\n",
-			 e->type, e->filename, p->descr->hdr.pkg_name );
+	      temp = query_pkg_db( db, canonical_path );
+	      if ( temp ) {
+		if ( strcmp( temp, old->hdr.pkg_name ) == 0 ) has_pkg_db = 1;
+		else has_pkg_db = 0;
+		free( temp );
 	      }
+	      else has_pkg_db = 0;
+
+	      if ( has_pkg_db ) {
+		if ( is->pass_eight_names_installed ) {
+		  result = rbtree_query( is->pass_eight_names_installed,
+					 canonical_path, NULL );
+		  /* We remove it if it was not installed in the new package */
+		  if ( result == RBTREE_NOT_FOUND ) need_to_remove = 1;
+		  else need_to_remove = 0;
+		}
+		/*
+		 * else we installed an empty package, so everything is
+		 * need-to-remove.
+		 */
+		else need_to_remove = 1;
+	      }
+	      /* else the old package no longer claimed it */
+	      else need_to_remove = 0;
+
+	      if ( need_to_remove ) {
+		/* Queue for removal in the appropriate rbtree */
+		switch ( e->type ) {
+		case ENTRY_DIRECTORY:
+		  result = rbtree_insert( dirs_to_handle, e->filename, e );
+		  if ( result != RBTREE_SUCCESS ) {
+		    fprintf( stderr,
+			     "Warning: error while trying to queue old directory %s from %s.\n",
+			     e->filename, old->hdr.pkg_name );
+		  }
+		  break;
+		case ENTRY_FILE:
+		  result = rbtree_insert( others_to_handle, e->filename, e );
+		  if ( result != RBTREE_SUCCESS ) {
+		    fprintf( stderr,
+			     "Warning: error while trying to queue old file %s from %s.\n",
+			     e->filename, old->hdr.pkg_name );
+		  }
+		  break;
+		case ENTRY_SYMLINK:
+		  result = rbtree_insert( others_to_handle, e->filename, e );
+		  if ( result != RBTREE_SUCCESS ) {
+		    fprintf( stderr,
+			     "Warning: error while trying to queue old symlink %s from %s.\n",
+			     e->filename, old->hdr.pkg_name );
+		  }
+		  break;
+		case ENTRY_LAST:
+		  /* Ignore */
+		  break;
+		default:
+		  /* Warn and ignore */
+		  fprintf( stderr,
+			   "Warning: unknown entry type %d for %s in old package description for %s.\n",
+			   e->type, e->filename, p->descr->hdr.pkg_name );
+		}
+	      }
+
+	      free( canonical_path );
+	    }
+	    else {
+	      fprintf( stderr,
+		       "Warning: error allocating memory for %s in old package description for %s\n",
+		       e->filename, old->hdr.pkg_name );
 	    }
 	  }
 
@@ -2224,7 +2254,7 @@ static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
 }
 
 static int handle_symlink_replace( pkg_db *db, pkg_descr_entry *e ) {
-  char *full_path, *target;
+  char *full_path, *target, *canonical_path;
   int status, result;
   struct stat buf;
 
@@ -2280,12 +2310,22 @@ static int handle_symlink_replace( pkg_db *db, pkg_descr_entry *e ) {
     }
 
     /* In any case, we can remove the pkgdb entry */
-    result = delete_from_pkg_db( db, e->filename );
-    if ( result != 0 ) {
+    canonical_path = canonicalize_and_copy( e->filename );
+    if ( canonical_path ) {
+      result = delete_from_pkg_db( db, canonical_path );
+      if ( result != 0 ) {
+	fprintf( stderr,
+		 "Warning: failed to remove pkgdb entry for old symlink %s\n",
+		 canonical_path );
+	status = INSTALL_ERROR;
+      }
+
+      free( canonical_path );
+    }
+    else {
       fprintf( stderr,
-	       "Warning: failed to remove pkgdb entry for old symlink %s\n",
+	       "Warning: error allocating memory while trying to remove pkgdb entry for old symlink %s\n",
 	       e->filename );
-      status = INSTALL_ERROR;
     }
   }
   else {
