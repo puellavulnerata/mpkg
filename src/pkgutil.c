@@ -524,58 +524,73 @@ int parse_strings_from_line( char *line, char ***strings_out ) {
  */
 
 int path_comparator( void *left, void *right ) {
-  char *ls, *rs;
+  char *ls, *rs, *lbuf, *rbuf;
   char *lcmp, *rcmp, *ltmp, *rtmp;
   int result, temp;
 
   ls = (char *)left;
   rs = (char *)rs;
   if ( ls && rs ) {
-    lcmp = get_path_component( ls, &ltmp );
-    rcmp = get_path_component( rs, &rtmp );
-    while ( 1 ) {
-      if ( lcmp && rcmp ) {
-	temp = strcmp( lcmp, rcmp );
-	if ( temp > 0 ) {
-	  /*
-	   * rcmp is alphabetically prior to lcmp in the first
-	   * component after a common prefix, so rs sorts first.
-	   */
-	  result = 1;
-	  break;
-	}
-	else if ( temp < 0 ) {
-	  /* As above, but ls sorts first. */
-	  result = -1;
-	  break;
+    lbuf = malloc( sizeof( *lbuf ) * ( strlen( ls ) + 1 ) );
+    rbuf = malloc( sizeof( *rbuf ) * ( strlen( rs ) + 1 ) );
+    if ( lbuf && rbuf ) {
+      strcpy( lbuf, ls );
+      strcpy( rbuf, rs );
+      lcmp = get_path_component( lbuf, &ltmp );
+      rcmp = get_path_component( rbuf, &rtmp );
+      while ( 1 ) {
+	if ( lcmp && rcmp ) {
+	  temp = strcmp( lcmp, rcmp );
+	  if ( temp > 0 ) {
+	    /*
+	     * rcmp is alphabetically prior to lcmp in the first
+	     * component after a common prefix, so rs sorts first.
+	     */
+	    result = 1;
+	    break;
+	  }
+	  else if ( temp < 0 ) {
+	    /* As above, but ls sorts first. */
+	    result = -1;
+	    break;
+	  }
+	  else {
+	    /* These components match; get the next ones */
+	    lcmp = get_path_component( NULL, &ltmp );
+	    rcmp = get_path_component( NULL, &rtmp );
+	  }
 	}
 	else {
-	  /* These components match; get the next ones */
-	  lcmp = get_path_component( NULL, &ltmp );
-	  rcmp = get_path_component( NULL, &rtmp );
+	  /* We ran out of data on at least one */
+	  if ( lcmp ) {
+	    /*
+	     * We still have a left component, but no right component,
+	     * so ls is a prefix of rs, and rs sorts first.
+	     */
+	    result = 1;
+	  }
+	  else if ( rcmp ) {
+	    /* As above, but rs is a prefix of ls */
+	    result = -1;
+	  }
+	  else {
+	    /* We finished both simultaneously; they must be identical */
+	    result = 0;
+	  }
+	  
+	  /* We're done */
+	  break;
 	}
       }
-      else {
-	/* We ran out of data on at least one */
-	if ( lcmp ) {
-	  /*
-	   * We still have a left component, but no right component,
-	   * so ls is a prefix of rs, and rs sorts first.
-	   */
-	  result = 1;
-	}
-	else if ( rcmp ) {
-	  /* As above, but rs is a prefix of ls */
-	  result = -1;
-	}
-	else {
-	  /* We finished both simultaneously; they must be identical */
-	  result = 0;
-	}
 
-	/* We're done */
-	break;
-      }
+      free( lbuf );
+      free( rbuf );
+    }
+    else {
+      /* Alloc error */
+      if ( lbuf ) free( lbuf );
+      if ( rbuf ) free( rbuf );
+      result = 0;
     }
   }
   else {
