@@ -2038,11 +2038,13 @@ static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
 	    e = &(old->entries[i]);
 	    /*
 	     * Check if it's in the list of things we installed
-	     * earlier, and if it still has a pkgdb entry
+	     * earlier, and if it still has a pkgdb entry owned by the
+	     * old install.
 	     */
 	    temp = query_pkg_db( db, e->filename );
 	    if ( temp ) {
-	      has_pkg_db = 1;
+	      if ( strcmp( temp, old->hdr.pkg_name ) == 0 ) has_pkg_db = 1;
+	      else has_pkg_db = 0;
 	      free( temp );
 	    }
 	    else has_pkg_db = 0;
