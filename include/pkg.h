@@ -10,6 +10,7 @@
 #include <pkgpath.h>
 #include <pkgutil.h>
 #include <rbtree.h>
+#include <remove.h>
 #include <streams.h>
 #include <tar.h>
 #include <unpack.h>

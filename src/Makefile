@@ -5,8 +5,8 @@ LIBS=
 
 OBJS=\
 	createdb.o install.o md5.o pkg.o pkgdb.o pkgdb_text_file.o pkgdescr.o \
-	pkgglobal.o pkgpath.o pkgutil.o rbtree.o streams_none.o streams.o \
-	tar.o unpack.o
+	pkgglobal.o pkgpath.o pkgutil.o rbtree.o remove.o streams_none.o \
+	streams.o tar.o unpack.o
 
 ifdef CONFIG_BDB
 	OBJS+=pkgdb_bdb.o
