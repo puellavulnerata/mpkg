@@ -91,6 +91,8 @@ static int remove_directory( pkg_db *db, pkg_descr *descr,
 	  }
 	}
 	/* else something else claims it now, so skip it */
+
+	free( owner );
       }
       /* else it isn't claimed any more, so skip it */
 
@@ -183,6 +185,8 @@ static int remove_file( pkg_db *db, pkg_descr *descr, pkg_descr_entry *e ) {
 	  }
 	}
 	/* else something else claims it now, so skip it */
+
+	free( owner );
       }
       /* else it isn't claimed any more, so skip it */
 
@@ -252,7 +256,6 @@ static int remove_pkg_by_descr( pkg_db *db, pkg_descr *descr ) {
 	e = &(descr->entries[i]);
 	switch ( e->type ) {
 	case ENTRY_DIRECTORY:
-	  printf( "Directory %s\n", e->filename );
 	  result = rbtree_insert( dir_queue, e->filename, e );
 	  if ( result != RBTREE_SUCCESS ) {
 	    fprintf( stderr,
@@ -342,6 +345,7 @@ static int remove_pkg( pkg_db *db, const char *pkg ) {
 	descr = read_pkg_descr_from_file( descr_path );
 	if ( descr ) {
 	  result = remove_pkg_by_descr( db, descr );
+	  free_pkg_descr( descr );
 	  if ( result == REMOVE_SUCCESS ) {
 	    /*
 	     * We succeeded, so no pkgdb entries remain referring to
@@ -350,8 +354,6 @@ static int remove_pkg( pkg_db *db, const char *pkg ) {
 	    unlink( descr_path );
 	  }
 	  else status = result;
-
-	  free_pkg_descr( descr );
 	}
 	else {
 	  fprintf( stderr,
@@ -449,6 +451,8 @@ static int remove_symlink( pkg_db *db, pkg_descr *descr, pkg_descr_entry *e ) {
 	  }
 	}
 	/* else something else claims it now, so skip it */
+
+	free( owner );
       }
       /* else it isn't claimed any more, so skip it */
 
