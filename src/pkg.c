@@ -6,17 +6,16 @@
 
 static void help_callback( int, char ** );
 int main( int, char **, char ** );
-static void test_callback( int, char ** );
 
 struct cmd_s {
   char *name;
   void (*callback)( int, char ** );
 } cmd_table[] = {
+  { "create", create_main },
+  { "createdb", createdb_main },
   { "help", help_callback },
-  { "test", test_callback },
   { "install", install_main },
   { "remove", remove_main },
-  { "createdb", createdb_main },
   { NULL, NULL }
 };
 
@@ -115,10 +114,4 @@ int main( int argc, char **argv, char **envp ) {
   free_pkg_globals();
 
   return 0;
-}
-
-static void test_callback( int argc, char **argv ) {
-  printf( "test callback\n" );
-  printf( "pkgdir is %s, instroot is %s, tempdir is %s\n",
-	  get_pkg(), get_root(), get_temp() );
 }
