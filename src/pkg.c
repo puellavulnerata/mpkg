@@ -2,6 +2,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef USE_MTRACE
+#include <mcheck.h>
+#endif
+
 #include <pkg.h>
 
 static void help_callback( int, char ** );
@@ -31,6 +35,10 @@ int main( int argc, char **argv, char **envp ) {
   char *cmd, *curr;
   int cmd_argc;
   char **cmd_argv;
+
+#ifdef USE_MTRACE
+  mtrace();
+#endif
 
   init_pkg_globals();
 
@@ -112,6 +120,10 @@ int main( int argc, char **argv, char **envp ) {
   }
 
   free_pkg_globals();
+
+#ifdef USE_MTRACE
+  muntrace();
+#endif
 
   return 0;
 }
