@@ -109,8 +109,13 @@ static create_pkg_info * alloc_pkginfo( create_opts *opts ) {
       temp->files_count = 0;
       temp->symlinks_count = 0;
    
+      /*
+       * Use pre_path_comparator() for all of these so things appear
+       * in creation order.
+       */
+
       if ( get_dirs_enabled( opts ) && !error ) {
-	temp->dirs = rbtree_alloc( rbtree_string_comparator,
+	temp->dirs = rbtree_alloc( pre_path_comparator,
 				   rbtree_string_copier,
 				   rbtree_string_free,
 				   dir_info_copier,
@@ -119,7 +124,7 @@ static create_pkg_info * alloc_pkginfo( create_opts *opts ) {
       }
 
       if ( get_files_enabled( opts ) && !error ) {
-	temp->files = rbtree_alloc( rbtree_string_comparator,
+	temp->files = rbtree_alloc( pre_path_comparator,
 				    rbtree_string_copier,
 				    rbtree_string_free,
 				    file_info_copier,
@@ -128,7 +133,7 @@ static create_pkg_info * alloc_pkginfo( create_opts *opts ) {
       }
 
       if ( get_symlinks_enabled( opts ) && !error ) {
-	temp->symlinks = rbtree_alloc( rbtree_string_comparator,
+	temp->symlinks = rbtree_alloc( pre_path_comparator,
 				       rbtree_string_copier,
 				       rbtree_string_free,
 				       symlink_info_copier,
