@@ -117,6 +117,51 @@ int file_hash_matches( const char *filename, uint8_t *hash ) {
   return result;
 }
 
+#define GET_BUF_LEN 1024
+
+int get_file_hash( const char *filename, uint8_t *hash ) {
+  int result;
+  md5_state *md5_ctxt;
+  read_stream *file_rs;
+  write_stream *md5_ws;
+  void *buf;
+  long len;
+
+  result = 0;
+  md5_ctxt = start_new_md5();
+  if ( md5_ctxt ) {
+    md5_ws = get_md5_ws( md5_ctxt );
+    if ( md5_ws ) {
+      file_rs = open_read_stream_none( filename );
+      if ( file_rs ) {
+	buf = malloc( MATCH_BUF_LEN );
+	if ( buf ) {
+	  while ( ( len = read_from_stream( file_rs, buf,
+					    MATCH_BUF_LEN ) ) > 0 ) {
+	    write_to_stream( md5_ws, buf, len );
+	  }
+	  free( buf );
+	}
+	else result = -4;
+
+	close_read_stream( file_rs );
+      }
+      else result = -3;
+
+      close_write_stream( md5_ws );
+      if ( result == 0 ) {
+	if ( get_md5_result( md5_ctxt, hash ) != 0 ) result = -5;
+      }
+    }
+    else result = -2;
+    
+    close_md5( md5_ctxt );
+  }
+  else result = -1;
+
+  return result;
+}
+
 int get_md5_result( md5_state *md5, uint8_t *out ) {
   if ( md5 && out ) {
     if ( md5->state == MD5_DONE ) {
