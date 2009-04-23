@@ -529,7 +529,7 @@ int post_path_comparator( void *left, void *right ) {
   int result, temp;
 
   ls = (char *)left;
-  rs = (char *)rs;
+  rs = (char *)right;
   if ( ls && rs ) {
     lbuf = malloc( sizeof( *lbuf ) * ( strlen( ls ) + 1 ) );
     rbuf = malloc( sizeof( *rbuf ) * ( strlen( rs ) + 1 ) );
@@ -588,8 +588,12 @@ int post_path_comparator( void *left, void *right ) {
     }
     else {
       /* Alloc error */
+      fprintf( stderr,
+	       "Warning: unable to allocagte memory in post_path_comparator()\n" );
+
       if ( lbuf ) free( lbuf );
       if ( rbuf ) free( rbuf );
+
       result = 0;
     }
   }
