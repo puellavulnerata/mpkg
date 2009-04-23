@@ -518,12 +518,12 @@ int parse_strings_from_line( char *line, char ***strings_out ) {
 }
 
 /*
- * int path_comparator( void *left, void *right );
+ * int post_path_comparator( void *left, void *right );
  *
  * Path comparator for rbtrees which sorts paths ahead of their prefixes
  */
 
-int path_comparator( void *left, void *right ) {
+int post_path_comparator( void *left, void *right ) {
   char *ls, *rs, *lbuf, *rbuf;
   char *lcmp, *rcmp, *ltmp, *rtmp;
   int result, temp;
@@ -600,6 +600,17 @@ int path_comparator( void *left, void *right ) {
   }
 
   return result;
+}
+
+/*
+ * int pre_path_comparator( void *left, void *right );
+ *
+ * Path comparator for rbtrees which sorts paths after their prefixes.
+ * This is the opposite of post_path_comparator().
+ */
+
+int pre_path_comparator( void *left, void *right ) {
+  return post_path_comparator( right, left );
 }
 
 /*

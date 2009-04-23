@@ -2047,10 +2047,10 @@ static int handle_replace( pkg_db *db, pkg_handle *p, install_state *is ) {
 	others_to_handle = rbtree_alloc( rbtree_string_comparator,
 					 NULL, NULL, NULL, NULL );
 	/*
-	 * Use path_comparator for directories, so subdirectories
+	 * Use post_path_comparator for directories, so subdirectories
 	 * will be processed ahead of their parents
 	 */
-	dirs_to_handle = rbtree_alloc( path_comparator,
+	dirs_to_handle = rbtree_alloc( post_path_comparator,
 				       NULL, NULL, NULL, NULL );
 
 	if ( dirs_to_handle && others_to_handle ) {

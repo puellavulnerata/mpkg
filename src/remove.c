@@ -245,7 +245,7 @@ static int remove_pkg_by_descr( pkg_db *db, pkg_descr *descr ) {
   status = REMOVE_SUCCESS;
   if ( db && descr ) {
     /* Allocate an rbtree to queue directories in */
-    dir_queue = rbtree_alloc( path_comparator,
+    dir_queue = rbtree_alloc( post_path_comparator,
 			      NULL, NULL, NULL, NULL );
     if ( dir_queue ) {
       /*
