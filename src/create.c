@@ -71,17 +71,59 @@ typedef struct {
   int dirs_count, files_count, symlinks_count;
 } create_pkg_info;
 
+typedef struct {
+  /* Bare ws for the output file */
+  write_stream *out_ws;
+  /*
+   * Compressed ws wrapped around out_ws for V1, and around content_ws
+   * during content emission for V2
+   */
+  write_stream *comp_ws;
+  /*
+   * Either out_ws or comp_ws, depending on version and compression.
+   * We attach the outer tar_writer to this.
+   */
+  write_stream *ws;
+  /* The outer tar_writer for V2, the only tar_writer for V1 */
+  tar_writer *pkg_tw;
+#ifdef PKGFMT_V2
+  /* tar_file_info for the content tarball's entry in the outer tarball */
+  tar_file_info ti_outer;
+  /* The bare ws for the package-content.tar.{|gz|bz2} file */
+  write_stream *content_out_ws;
+  /* We use comp_ws for the compressed ws around it in the V2 case */
+  /* content_ws is either comp_ws or content_out_ws, as appropriate */
+  write_stream *content_ws;
+#endif /* PKGFMT_V2 */
+  /*
+   * This is the tar_writer to emit files to.  It will be just pkg_tw
+   * for V1, and will be the inner tar_writer for V2
+   */
+  tar_writer *emit_tw;
+} create_pkg_streams;
+
 static create_pkg_info * alloc_pkginfo( create_opts * );
-static int build_pkg_descr( create_opts *, create_pkg_info *,
-			    tar_writer *, pkg_descr ** );
-static void create_build_pkg( create_opts * );
+static int build_pkg_descr_dirs( create_opts *, create_pkg_info *,
+				 pkg_descr * );
+static int build_pkg_descr_files( create_opts *, create_pkg_info *,
+				  pkg_descr * );
+static int build_pkg_descr_symlinks( create_opts *, create_pkg_info *,
+				     pkg_descr * );
+static int build_pkg_descr( create_opts *, create_pkg_info *, pkg_descr ** );
+static void build_pkg( create_opts * );
+#ifdef PKGFMT_V1
+static int check_path_for_descr( const char * );
+#endif /* PKGFMT_V1 */
 static int create_parse_options( create_opts *, int, char ** );
 static void * dir_info_copier( void * );
 static void dir_info_free( void * );
-static int emit_file_to_tar_writer( const char *, tar_file_info *, 
-				    tar_writer * );
+static int emit_descr( pkg_descr *, tar_writer * );
+static int emit_file( const char *, tar_file_info *, tar_writer * );
+static int emit_files( create_opts *, create_pkg_info *, tar_writer * );
 static void * file_info_copier( void * );
 static void file_info_free( void * );
+static void finish_content( create_opts *, create_pkg_streams * );
+static void finish_streams( create_opts *, create_pkg_streams * );
 static void free_create_opts( create_opts * );
 static void free_pkginfo( create_pkg_info * );
 static create_compression_opt get_compression( create_opts * );
@@ -91,6 +133,9 @@ static time_t get_pkg_mtime( create_pkg_info * );
 static char * get_pkg_name( create_opts * );
 static int get_symlinks_enabled( create_opts * );
 static create_version_opt get_version( create_opts * );
+static int prepare_streams_for_content( create_opts *, create_pkg_info *,
+					create_pkg_streams * );
+static create_pkg_streams * prepare_streams( create_opts * );
 static int scan_directory_tree_internal( create_opts *, create_pkg_info *,
 					 const char *, const char * );
 static int scan_directory_tree( create_opts *, create_pkg_info * );
@@ -162,22 +207,376 @@ static create_pkg_info * alloc_pkginfo( create_opts *opts ) {
   return temp;
 }
 
-static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
-			    tar_writer *emit_tw, pkg_descr **descr_out ) {
-  int status, result, i;
-  pkg_descr *descr;
-  /* These are used when enumerating after scan_directory_tree() */
+static int build_pkg_descr_dirs( create_opts *opts, create_pkg_info *pkginfo,
+				 pkg_descr *descr ) {
+  int status, result, i, count;
   rbtree_node *n;
+  char *path, *temp, *cmp, *marker;
   void *info_v;
-  char *path;
   create_dir_info *di;
-  create_file_info *fi;
-  create_symlink_info *si;
-  char *tar_filename;
-  tar_file_info ti;
 
   status = CREATE_SUCCESS;
-  if ( opts && pkginfo && emit_tw && descr_out ) {
+  if ( opts && pkginfo && descr ) {
+    if ( pkginfo->dirs_count > 0 ) {
+      if ( pkginfo->dirs && /* dirs must exist */
+	   /* the caller must have allocated enough space */
+	   descr->num_entries + pkginfo->dirs_count <=
+	   descr->num_entries_alloced ) {
+	/* count how many entries we see */
+	count = 0;
+	n = NULL;
+	do {
+	  di = NULL;
+	  path = rbtree_enum( pkginfo->dirs, n, &info_v, &n );
+	  if ( path ) {
+	    if ( info_v ) {
+	      di = (create_dir_info *)info_v;
+
+#ifdef PKGFMT_V1
+	      /*
+	       * Don't allow anything named starting in
+	       * /package-description in V1, since the
+	       * package-description file lives in the same tarball
+	       * with the package contents.
+	       */
+
+	      if ( get_version_opt( opts ) == V1 ) {
+		result = check_path_for_descr( path );
+		if ( result == 1 ) {
+		  fprintf( stderr,
+			   "Can't use path %s in V1 format\n",
+			   path );
+		  status = CREATE_ERROR;
+		}
+		else if ( result == -1 ) {
+		  fprintf( stderr, "Unable to allocate memory\n" );
+		  status = CREATE_ERROR;
+		}
+	      }
+#endif /* PKGFMT_V1 */
+
+	      if ( status == CREATE_SUCCESS ) {
+		/* don't do more than dirs_count */
+		if ( count < pkginfo->dirs_count ) {
+		  i = descr->num_entries;
+		  if ( i < descr->num_entries_alloced ) {
+		    descr->entries[i].type = ENTRY_DIRECTORY;
+		    descr->entries[i].filename = copy_string( path );
+		    descr->entries[i].owner = copy_string( di->owner );
+		    descr->entries[i].group = copy_string( di->group );
+		    descr->entries[i].u.d.mode = di->mode;
+			  
+		    if ( descr->entries[i].filename &&
+			 descr->entries[i].owner &&
+			 descr->entries[i].group ) {
+		      ++(descr->num_entries);
+		      ++count;
+		    }
+		    else {
+		      if ( descr->entries[i].filename )
+			free( descr->entries[i].filename );
+		      if ( descr->entries[i].owner )
+			free( descr->entries[i].owner );
+		      if ( descr->entries[i].group )
+			free( descr->entries[i].group );
+		      /*
+		       * Mark it as the last one for when we
+		       * free if we have an error.
+		       */
+		      descr->entries[i].type = ENTRY_LAST;
+		      fprintf( stderr, "Unable to allocate memory\n" );
+		      status = CREATE_ERROR;
+		    }
+		  }
+		  else {
+		    fprintf( stderr,
+			     "Internal error during package creation (ran out of pkg_descr_entry slots at directory %s)\n",
+			     path );
+		    status = CREATE_ERROR;
+		  }
+		}
+		else {
+		  fprintf( stderr,
+			   "Internal error during package creation (saw too many dirs in rbtree at directory %s)\n",
+			   path );
+		  status = CREATE_ERROR;
+		}
+	      }
+	      /*
+	       * else we already emitted the error message when we
+	       * checked the path for V1 validity
+	       */
+	    }
+	    else {
+	      fprintf( stderr,
+		       "Internal error during package creation (enumerating dirs rbtree, path %s)\n",
+		       path );
+	      status = CREATE_ERROR;
+	    }
+	  }
+	  /* else we're done */
+	} while ( n && status == CREATE_SUCCESS );
+      }
+      else status = CREATE_ERROR;
+    }
+    /* else nothing to do */
+  }
+  else status = CREATE_ERROR;
+
+  return status;
+}
+
+static int build_pkg_descr_files( create_opts *opts, create_pkg_info *pkginfo,
+				  pkg_descr *descr ) {
+  int status, result, i, count;
+  rbtree_node *n;
+  char *path;
+  void *info_v;
+  create_file_info *fi;
+
+  status = CREATE_SUCCESS;
+  if ( opts && pkginfo && descr ) {
+    if ( pkginfo->files_count > 0 ) {
+      if ( pkginfo->files && /* files must exist */
+	   /* the caller must have allocated enough space */
+	   descr->num_entries + pkginfo->files_count <=
+	   descr->num_entries_alloced ) {
+	/* count how many entries we see */
+	count = 0;
+	n = NULL;
+	do {
+	  fi = NULL;
+	  path = rbtree_enum( pkginfo->files, n, &info_v, &n );
+	  if ( path ) {
+	    if ( info_v ) {
+	      fi = (create_file_info *)info_v;
+
+#ifdef PKGFMT_V1
+	      /*
+	       * Don't allow anything named starting in
+	       * /package-description in V1, since the
+	       * package-description file lives in the same tarball
+	       * with the package contents.
+	       */
+
+	      if ( get_version_opt( opts ) == V1 ) {
+		result = check_path_for_descr( path );
+		if ( result == 1 ) {
+		  fprintf( stderr,
+			   "Can't use path %s in V1 format\n",
+			   path );
+		  status = CREATE_ERROR;
+		}
+		else if ( result == -1 ) {
+		  fprintf( stderr, "Unable to allocate memory\n" );
+		  status = CREATE_ERROR;
+		}
+	      }
+#endif /* PKGFMT_V1 */
+
+	      if ( status == CREATE_SUCCESS ) {
+		/* don't do more than files_count */
+		if ( count < pkginfo->files_count ) {
+		  i = descr->num_entries;
+		  if ( i < descr->num_entries_alloced ) {
+		    descr->entries[i].type = ENTRY_FILE;
+		    descr->entries[i].filename = copy_string( path );
+		    descr->entries[i].owner = copy_string( fi->owner );
+		    descr->entries[i].group = copy_string( fi->group );
+		    descr->entries[i].u.f.mode = fi->mode;
+		    memcpy( descr->entries[i].u.f.hash, fi->hash,
+			    sizeof( fi->hash ) );
+			  
+		    if ( descr->entries[i].filename &&
+			 descr->entries[i].owner &&
+			 descr->entries[i].group ) {
+		      ++(descr->num_entries);
+		      ++count;
+		    }
+		    else {
+		      if ( descr->entries[i].filename )
+			free( descr->entries[i].filename );
+		      if ( descr->entries[i].owner )
+			free( descr->entries[i].owner );
+		      if ( descr->entries[i].group )
+			free( descr->entries[i].group );
+		      /*
+		       * Mark it as the last one for when we
+		       * free if we have an error.
+		       */
+		      descr->entries[i].type = ENTRY_LAST;
+		      fprintf( stderr, "Unable to allocate memory\n" );
+		      status = CREATE_ERROR;
+		    }
+		  }
+		  else {
+		    fprintf( stderr,
+			     "Internal error during package creation (ran out of pkg_descr_entry slots at file %s)\n",
+			     path );
+		    status = CREATE_ERROR;
+		  }
+		}
+		else {
+		  fprintf( stderr,
+			   "Internal error during package creation (saw too many files in rbtree at file %s)\n",
+			   path );
+		  status = CREATE_ERROR;
+		}
+	      }
+	      /*
+	       * else we already emitted the error message when we
+	       * checked the path for V1 validity
+	       */
+	    }
+	    else {
+	      fprintf( stderr,
+		       "Internal error during package creation (enumerating files rbtree, path %s)\n",
+		       path );
+	      status = CREATE_ERROR;
+	    }
+	  }
+	  /* else we're done */
+	} while ( n && status == CREATE_SUCCESS );
+      }
+      else status = CREATE_ERROR;
+    }
+    /* else nothing to do */
+  }
+  else status = CREATE_ERROR;
+
+  return status;
+}
+
+static int build_pkg_descr_symlinks( create_opts *opts, create_pkg_info *pkginfo,
+				     pkg_descr *descr ) {
+  int status, result, i, count;
+  rbtree_node *n;
+  char *path;
+  void *info_v;
+  create_symlink_info *si;
+
+  status = CREATE_SUCCESS;
+  if ( opts && pkginfo && descr ) {
+    if ( pkginfo->symlinks_count > 0 ) {
+      if ( pkginfo->symlinks && /* symlinks must exist */
+	   /* the caller must have allocated enough space */
+	   descr->num_entries + pkginfo->symlinks_count <=
+	   descr->num_entries_alloced ) {
+	/* count how many entries we see */
+	count = 0;
+	n = NULL;
+	do {
+	  si = NULL;
+	  path = rbtree_enum( pkginfo->symlinks, n, &info_v, &n );
+	  if ( path ) {
+	    if ( info_v ) {
+	      si = (create_symlink_info *)info_v;
+
+#ifdef PKGFMT_V1
+	      /*
+	       * Don't allow anything named starting in
+	       * /package-description in V1, since the
+	       * package-description file lives in the same tarball
+	       * with the package contents.
+	       */
+
+	      if ( get_version_opt( opts ) == V1 ) {
+		result = check_path_for_descr( path );
+		if ( result == 1 ) {
+		  fprintf( stderr,
+			   "Can't use path %s in V1 format\n",
+			   path );
+		  status = CREATE_ERROR;
+		}
+		else if ( result == -1 ) {
+		  fprintf( stderr, "Unable to allocate memory\n" );
+		  status = CREATE_ERROR;
+		}
+	      }
+#endif /* PKGFMT_V1 */
+
+	      if ( status == CREATE_SUCCESS ) {
+		/* don't do more than dirs_count */
+		if ( count < pkginfo->symlinks_count ) {
+		  i = descr->num_entries;
+		  if ( i < descr->num_entries_alloced ) {
+		    descr->entries[i].type = ENTRY_SYMLINK;
+		    descr->entries[i].filename = copy_string( path );
+		    descr->entries[i].owner = copy_string( si->owner );
+		    descr->entries[i].group = copy_string( si->group );
+		    descr->entries[i].u.s.target = copy_string( si->target );
+			  
+		    if ( descr->entries[i].filename &&
+			 descr->entries[i].owner &&
+			 descr->entries[i].group &&
+			 descr->entries[i].u.s.target ) {
+		      ++(descr->num_entries);
+		      ++count;
+		    }
+		    else {
+		      if ( descr->entries[i].filename )
+			free( descr->entries[i].filename );
+		      if ( descr->entries[i].owner )
+			free( descr->entries[i].owner );
+		      if ( descr->entries[i].group )
+			free( descr->entries[i].group );
+		      if ( descr->entries[i].u.s.target )
+			free( descr->entries[i].u.s.target );
+
+		      /*
+		       * Mark it as the last one for when we
+		       * free if we have an error.
+		       */
+		      descr->entries[i].type = ENTRY_LAST;
+		      fprintf( stderr, "Unable to allocate memory\n" );
+		      status = CREATE_ERROR;
+		    }
+		  }
+		  else {
+		    fprintf( stderr,
+			     "Internal error during package creation (ran out of pkg_descr_entry slots at symlink %s)\n",
+			     path );
+		    status = CREATE_ERROR;
+		  }
+		}
+		else {
+		  fprintf( stderr,
+			   "Internal error during package creation (saw too many symlinks in rbtree at symlink %s)\n",
+			   path );
+		  status = CREATE_ERROR;
+		}
+	      }
+	      /*
+	       * else we already emitted the error message when we
+	       * checked the path for V1 validity
+	       */	      
+	    }
+	    else {
+	      fprintf( stderr,
+		       "Internal error during package creation (enumerating symlinks rbtree, path %s)\n",
+		       path );
+	      status = CREATE_ERROR;
+	    }
+	  }
+	  /* else we're done */
+	} while ( n && status == CREATE_SUCCESS );
+      }
+      else status = CREATE_ERROR;
+    }
+    /* else nothing to do */
+  }
+  else status = CREATE_ERROR;
+
+  return status;
+}
+
+static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
+			    pkg_descr **descr_out ) {
+  int status, result, i;
+  pkg_descr *descr;
+
+  status = CREATE_SUCCESS;
+  if ( opts && pkginfo && descr_out ) {
     descr = malloc( sizeof( *descr) );
     if ( descr ) {
       descr->entries = NULL;
@@ -216,225 +615,29 @@ static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
 	 * rbtrees constructed in scan_directory_tree().
 	 */
 
-	/*
-	 * TODO refactor this: break out dir/file/symlink loops into
-	 * their own functions
-	 */
-	
 	/* Do the directories first */
 	if ( pkginfo->dirs && get_dirs_enabled( opts ) &&
 	     pkginfo->dirs_count > 0 ) {
-	  n = NULL;
-	  do {
-	    di = NULL;
-	    path = rbtree_enum( pkginfo->dirs, n, &info_v, &n );
-	    if ( path ) {
-	      if ( info_v ) {
-		di = (create_dir_info *)info_v;
-		i = descr->num_entries;
-		if ( i < descr->num_entries_alloced ) {
-		  descr->entries[i].type = ENTRY_DIRECTORY;
-		  descr->entries[i].filename = copy_string( path );
-		  descr->entries[i].owner = copy_string( di->owner );
-		  descr->entries[i].group = copy_string( di->group );
-		  descr->entries[i].u.d.mode = di->mode;
-			  
-		  if ( descr->entries[i].filename &&
-		       descr->entries[i].owner &&
-		       descr->entries[i].group ) {
-		    ++(descr->num_entries);
-		  }
-		  else {
-		    if ( descr->entries[i].filename )
-		      free( descr->entries[i].filename );
-		    if ( descr->entries[i].owner )
-		      free( descr->entries[i].owner );
-		    if ( descr->entries[i].group )
-		      free( descr->entries[i].group );
-		    /*
-		     * Mark it as the last one for when we
-		     * free if we have an error.
-		     */
-		    descr->entries[i].type = ENTRY_LAST;
-		    fprintf( stderr, "Unable to allocate memory\n" );
-		    status = CREATE_ERROR;
-		  }
-		}
-		else {
-		  fprintf( stderr,
-			   "Internal error while create package description (ran out of pkg_descr_entry slots at directory %s)\n",
-			   path );
-		  status = CREATE_ERROR;
-		}
-	      }
-	      else {
-		fprintf( stderr,
-			 "Internal error during package create (enumerating dirs rbtree, path %s)\n",
-			 path );
-		status = CREATE_ERROR;
-	      }
-	    }
-	    /* else we're done */
-	  } while ( n && status == CREATE_SUCCESS );
+	  result = build_pkg_descr_dirs( opts, pkginfo, descr );
+	  if ( result != CREATE_SUCCESS ) status = result;
 	}
 	/* else nothing to do for dirs */
-
-	/* We can free the directory rbtree now */
-	if ( pkginfo->dirs ) {
-	  rbtree_free( pkginfo->dirs );
-	  pkginfo->dirs = NULL;
-	}
 
 	/* Now do the files */
 	if ( status == CREATE_SUCCESS && pkginfo->files &&
 	     get_files_enabled( opts ) && pkginfo->files_count > 0 ) {
-	  n = NULL;
-	  do {
-	    fi = NULL;
-	    path = rbtree_enum( pkginfo->files, n, &info_v, &n );
-	    if ( path ) {
-	      /* TODO check for package-description and throw an error */
-	      if ( info_v ) {
-		fi = (create_file_info *)info_v;
-		i = descr->num_entries;
-		if ( i < descr->num_entries_alloced ) {
-		  descr->entries[i].type = ENTRY_FILE;
-		  descr->entries[i].filename = copy_string( path );
-		  descr->entries[i].owner = copy_string( fi->owner );
-		  descr->entries[i].group = copy_string( fi->group );
-		  descr->entries[i].u.f.mode = fi->mode;
-		  memcpy( descr->entries[i].u.f.hash, fi->hash,
-			  sizeof( fi->hash ) );
-			  
-		  if ( descr->entries[i].filename &&
-		       descr->entries[i].owner &&
-		       descr->entries[i].group ) {
-		    ++(descr->num_entries);
-
-		    /* Strip off leading slashes */
-		    tar_filename = path;
-		    while ( *tar_filename == '/' ) ++tar_filename;
-		    /* Now emit the file */
-		    ti.type = TAR_FILE;
-		    strncpy( ti.filename, tar_filename,
-			     TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
-		    strncpy( ti.target, "", TAR_TARGET_LEN + 1 );
-		    ti.owner = 0;
-		    ti.group = 0;
-		    ti.mode = 0600;
-		    ti.mtime = get_pkg_mtime( pkginfo );
-		    result =
-		      emit_file_to_tar_writer( fi->src_path, &ti, emit_tw );
-		    if ( result != CREATE_SUCCESS ) status = result;
-		  }
-		  else {
-		    if ( descr->entries[i].filename )
-		      free( descr->entries[i].filename );
-		    if ( descr->entries[i].owner )
-		      free( descr->entries[i].owner );
-		    if ( descr->entries[i].group )
-		      free( descr->entries[i].group );
-		    /*
-		     * Mark it as the last one for when we
-		     * free if we have an error.
-		     */
-		    descr->entries[i].type = ENTRY_LAST;
-		    fprintf( stderr, "Unable to allocate memory\n" );
-		    status = CREATE_ERROR;
-		  }
-		}
-		else {
-		  fprintf( stderr,
-			   "Internal error while create package description (ran out of pkg_descr_entry slots at file %s)\n",
-			   path );
-		  status = CREATE_ERROR;
-		}
-	      }
-	      else {
-		fprintf( stderr,
-			 "Internal error during package create (enumerating files rbtree, path %s)\n",
-			 path );
-		status = CREATE_ERROR;
-	      }
-	    }
-	    /* else we're done */
-	  } while ( n && status == CREATE_SUCCESS );
+	  result = build_pkg_descr_files( opts, pkginfo, descr );
+	  if ( result != CREATE_SUCCESS ) status = result;
 	}
 	/* else nothing to do for files */
 
-	/* We can free the file rbtree now */
-	if ( pkginfo->files ) {
-	  rbtree_free( pkginfo->files );
-	  pkginfo->dirs = NULL;
-	}
-
-	/* Do the symlinkslast */
+	/* Do the symlinks last */
 	if ( pkginfo->symlinks && get_symlinks_enabled( opts ) &&
 	     pkginfo->symlinks_count > 0 ) {
-	  n = NULL;
-	  do {
-	    di = NULL;
-	    path = rbtree_enum( pkginfo->symlinks, n, &info_v, &n );
-	    if ( path ) {
-	      if ( info_v ) {
-		si = (create_symlink_info *)info_v;
-		i = descr->num_entries;
-		if ( i < descr->num_entries_alloced ) {
-		  descr->entries[i].type = ENTRY_SYMLINK;
-		  descr->entries[i].filename = copy_string( path );
-		  descr->entries[i].owner = copy_string( si->owner );
-		  descr->entries[i].group = copy_string( si->group );
-		  descr->entries[i].u.s.target = copy_string( si->target );
-			  
-		  if ( descr->entries[i].filename &&
-		       descr->entries[i].owner &&
-		       descr->entries[i].group &&
-		       descr->entries[i].u.s.target ) {
-		    ++(descr->num_entries);
-		  }
-		  else {
-		    if ( descr->entries[i].filename )
-		      free( descr->entries[i].filename );
-		    if ( descr->entries[i].owner )
-		      free( descr->entries[i].owner );
-		    if ( descr->entries[i].group )
-		      free( descr->entries[i].group );
-		    if ( descr->entries[i].u.s.target )
-		      free( descr->entries[i].u.s.target );
-
-		    /*
-		     * Mark it as the last one for when we
-		     * free if we have an error.
-		     */
-		    descr->entries[i].type = ENTRY_LAST;
-		    fprintf( stderr, "Unable to allocate memory\n" );
-		    status = CREATE_ERROR;
-		  }
-		}
-		else {
-		  fprintf( stderr,
-			   "Internal error while create package description (ran out of pkg_descr_entry slots at symlink %s)\n",
-			   path );
-		  status = CREATE_ERROR;
-		}
-	      }
-	      else {
-		fprintf( stderr,
-			 "Internal error during package create (enumerating symlinks rbtree, path %s)\n",
-			 path );
-		status = CREATE_ERROR;
-	      }
-	    }
-	    /* else we're done */
-	  } while ( n && status == CREATE_SUCCESS );
+	  result = build_pkg_descr_symlinks( opts, pkginfo, descr );
+	  if ( result != CREATE_SUCCESS ) status = result;
 	}
 	/* else nothing to do for symlinks */
-
-	/* We can free the symlink rbtree now */
-	if ( pkginfo->symlinks ) {
-	  rbtree_free( pkginfo->symlinks );
-	  pkginfo->symlinks = NULL;
-	}
 
 	/* Add an ENTRY_LAST, and we're done */
 	if ( status == CREATE_SUCCESS ) {
@@ -448,7 +651,7 @@ static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
 	  }
 	  else {
 	    fprintf( stderr,
-		     "Internal error while create package description (ran out of pkg_descr_entry slots at ENTRY_LAST)\n" );
+		     "Internal error during package creation (ran out of pkg_descr_entry slots at ENTRY_LAST)\n" );
 	    status = CREATE_ERROR;
 	  }
 	}
@@ -470,366 +673,135 @@ static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
   return status;
 }
 
-static void create_build_pkg( create_opts *opts ) {
-  create_pkg_info *pkginfo;
+static void build_pkg( create_opts *opts ) {
   int status, result;
-  /* Bare ws for the output file */
-  write_stream *out_ws;
-  /*
-   * Compressed ws wrapped around out_ws for V1, and around content_ws
-   * for V2
-   */
-  write_stream *comp_ws;
-  /*
-   * Either out_ws or comp_ws, depending on version and compression.
-   * We attach the outer tar_writer to this.
-   */
-  write_stream *ws;
-  /* The outer tar_writer for V2, the only tar_writer for V1 */
-  tar_writer *pkg_tw;
-#ifdef PKGFMT_V2
-  /* The bare ws for the package-content.tar.{|gz|bz2} file */
-  write_stream *content_out_ws;
-  /* We use comp_ws for the compressed ws around it in the V2 case */
-  /* content_ws is either comp_ws or content_out_ws, as appropriate */
-  write_stream *content_ws;
-#endif /* PKGFMT_V2 */
-  /*
-   * This is the tar_writer to emit files to.  It will be just pkg_tw
-   * for V1, and will be the inner tar_writer for V2
-   */
-  tar_writer *emit_tw;
-  /*
-   * This is package description to emit, assembled after
-   * scan_directory_tree() and then emitted to package-description.
-   */
+  create_pkg_info *pkginfo;
+  create_pkg_streams *streams;
   pkg_descr *descr;
 
   if ( opts ) {
     pkginfo = alloc_pkginfo( opts );
     if ( pkginfo ) {
-      out_ws = NULL;
-      comp_ws = NULL;
-      ws = NULL;
-      pkg_tw = NULL;
-#ifdef PKGFMT_V2
-      /* tar_file_info for use with the outer tarball in V2 */
-      tar_file_info ti_outer;
-      content_out_ws = NULL;
-      content_ws = NULL;
-#endif /* PKGFMT_V2 */
-      emit_tw = NULL;
+      streams = NULL;
       descr = NULL;
 
       /*
-       * We need to set up the output file here.  For a V1 package, we
-       * set up the appropriate compression stream, and then fit a
-       * tar_writer to it, and then emit files into that, and emit a
-       * package-description at the end.  For a V2 package, we open a
-       * bare write_stream, fit a tar_writer to it, start writing a
-       * single file called package-content.tar{|.bz2|.gz}, fit a
-       * compression stream to that if needed, then fit another
-       * tar_writer to that, and emit files.  When we're done emitting
-       * files, we close that tar writer and emit package-description
-       * in the outer tarball.
+       * scan_directory_tree() recursively walks the directory tree
+       * starting from opts->input_directory, and assembles the three
+       * rbtrees in pkginfo; the keys are paths starting from the base
+       * of the directory tree, and the values are create_dir_info,
+       * create_file_info or create_symlink_info structures which can
+       * be used later to assemble the pkgdescr entries in the correct
+       * order, and, in the case of create_file_info, locate the
+       * needed files when we emit the tarball.
        */
-	   
-      out_ws = open_write_stream_none( opts->output_file );
-      if ( out_ws ) {
-	switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-	case V1:
-	  switch ( get_compression( opts ) ) {
-	  case NONE:
-	    ws = out_ws;
-	    break;
-#ifdef COMPRESSION_GZIP
-	  case GZIP:
-	    comp_ws = open_write_stream_from_stream_gzip( out_ws );
-	    if ( comp_ws ) {
-	      ws = out_ws;
+
+      result = scan_directory_tree( opts, pkginfo );
+      if ( status == CREATE_SUCCESS ) {
+	/* Construct the pkg_descr */
+	result = build_pkg_descr( opts, pkginfo, &descr );
+	if ( result != CREATE_SUCCESS ) status = result;	 
+
+	/* Now we can free the directory and symlink rbtrees */
+	if ( pkginfo->dirs ) {
+	  rbtree_free( pkginfo->dirs );
+	  pkginfo->dirs = NULL;
+	}
+	if ( pkginfo->symlinks ) {
+	  rbtree_free( pkginfo->symlinks );
+	  pkginfo->symlinks = NULL;
+	}
+
+	if ( status == CREATE_SUCCESS ) {
+	  streams = prepare_streams( opts );
+	  if ( streams ) {
+	    result = emit_descr( descr, streams->pkg_tw );
+	    if ( result != CREATE_SUCCESS ) {
+	      fprintf( stderr, "Unable to emit package-description\n" );
+	      status = result;
 	    }
-	    else {
-	      fprintf( stderr,
-		       "Unable to open gzip output stream for file %s\n",
-		       opts->output_file );
-	      status = CREATE_ERROR;
+
+	    if ( status == CREATE_SUCCESS ) {
+	      /* Get ready to emit content */
+	      result = prepare_streams_for_content( opts, pkginfo, streams );
+	      if ( result == CREATE_SUCCESS ) {
+		/* Now emit the files */
+		result = emit_files( opts, pkginfo, streams->emit_tw );
+		if ( result != CREATE_SUCCESS ) {
+		  fprintf( stderr, "Unable to emit package contents\n" );
+		  status = result;
+		}
+		finish_content( opts, streams );
+	      }
+	      else {
+		fprintf( stderr, "Unable to emit package contents\n" );
+		status = result;
+	      }
 	    }
-	    break;
-#endif /* COMPRESSION_GZIP */
-#ifdef COMPRESSION_BZIP2
-	  case BZIP2:
-	    comp_ws = open_write_stream_from_stream_bzip2( out_ws );
-	    if ( comp_ws ) {
-	      ws = out_ws;
-	    }
-	    else {
-	      fprintf( stderr,
-		       "Unable to open bzip2 output stream for file %s\n",
-		       opts->output_file );
-	      status = CREATE_ERROR;
-	    }
-	    break;
-#endif /* COMPRESSION_BZIP2 */
-	  default:
-	    fprintf( stderr, "Internal error with get_compression()\n" );
+
+	    finish_streams( opts, streams );
+	    /* Remove the output if we had an error with it */
+	    if ( status != CREATE_SUCCESS ) unlink( opts->output_file );
+	  }
+	  else {
+	    fprintf( stderr,
+		     "Unable to open output streams for %s\n",
+		     opts->output_file );
 	    status = CREATE_ERROR;
 	  }
-	  break;
-#endif /* PKGFMT_V1 */
-#ifdef PKGFMT_V2
-	case V2:
-	  ws = out_ws;
-	  break;
-#endif /* PKGFMT_V2 */
-	default:
-	  fprintf( stderr, "Internal error with get_version()\n" );
-	  status = CREATE_ERROR;
+	}
+	else {
+	  fprintf( stderr, "Unable to build package-description\n" );
+	}
+
+	/* Now we can free the files rbtree */
+	if ( pkginfo->files ) {
+	  rbtree_free( pkginfo->files );
+	  pkginfo->files = NULL;
 	}
       }
       else {
 	fprintf( stderr,
-		 "Unable to open output file %s\n",
-		 opts->output_file );
-	status = CREATE_ERROR;
+		 "Failed to scan directory tree %s for package build\n",
+		 opts->input_directory );
+	status = result;
       }
 
-      if ( status == CREATE_SUCCESS ) {
-	/*
-	 * At this point, we have ws (which is identical to either
-	 * out_ws or comp_ws), and we can set up the outer tar writer
-	 * on it.
-	 */
-
-	pkg_tw = start_tar_writer( ws );
-	if ( pkg_tw ) {
-	  switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-	  case V1:
-	    /* We just emit straight to the outer tar_writer in V1 */
-	    emit_tw = pkg_tw;
-	    break;
-#endif /* PKGFMT_V1 */
-#ifdef PKGFMT_V2
-	  case V2:
-	    ti_outer.type = TAR_FILE;
-	    switch ( get_compression( opts ) ) {
-	    case NONE:
-	      strncpy( ti_outer.filename, "package-content.tar",
-		       TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
-	      break;
-#ifdef COMPRESSION_GZIP
-	    case GZIP:
-	      strncpy( ti_outer.filename, "package-content.tar.gz",
-		       TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
-	      break;
-#endif /* COMPRESSION_GZIP */
-#ifdef COMPRESSION_BZIP2
-	    case BZIP2:
-	      strncpy( ti_outer.filename, "package-content.tar.bz2",
-		       TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
-	      break;
-#endif /* COMPRESSION_BZIP2 */
-	    default:
-	      fprintf( stderr, "Internal error with get_compression()\n" );
-	      status = CREATE_ERROR;
-	    }
-	    strncpy( ti_outer.target, "", TAR_TARGET_LEN + 1 );
-	    ti_outer.owner = 0;
-	    ti_outer.group = 0;
-	    ti_outer.mode = 0755;
-	    ti_outer.mtime = get_pkg_mtime( pkginfo );
-	    content_out_ws = put_next_file( pkg_tw, &ti_outer );
-	    if ( content_out_ws ) {
-	      switch ( get_compression( opts ) ) {
-	      case NONE:
-		content_ws = content_out_ws;
-		break;
-#ifdef COMPRESSION_GZIP
-	      case GZIP:
-		/* We reuse comp_ws, since V2 didn't use it earlier */
-		comp_ws = open_write_stream_from_stream_gzip( content_out_ws );
-		if ( comp_ws ) content_ws = comp_ws;
-		else {
-		  fprintf( stderr,
-			   "Error setting up gzip compressed stream for inner content tarball in output file %s\n",
-			   opts->output_file );
-		  status = CREATE_ERROR;
-		}
-		break;
-#endif /* COMPRESSION_GZIP */
-#ifdef COMPRESSION_BZIP2
-	      case BZIP2:
-		/* We reuse comp_ws, since V2 didn't use it earlier */
-		comp_ws =
-		  open_write_stream_from_stream_bzip2( content_out_ws );
-		if ( comp_ws ) content_ws = comp_ws;
-		else {
-		  fprintf( stderr,
-			   "Error setting up bzip2 compressed stream for inner content tarball in output file %s\n",
-			   opts->output_file );
-		  status = CREATE_ERROR;
-		}
-		break;
-#endif /* COMPRESSION_BZIP2 */
-	      default:
-		fprintf( stderr, "Internal error with get_compression()\n" );
-		status = CREATE_ERROR;
-	      }
-
-	      if ( status == CREATE_SUCCESS ) {
-		/*
-		 * content_ws will be write_stream for the compressed
-		 * content tarball; fit emit_tw to it.
-		 */
-		emit_tw = start_tar_writer( content_ws );
-		if ( !emit_tw ) {
-		  fprintf( stderr,
-			   "Error writing inner content tarball in output file %s\n",
-			   opts->output_file );
-		  status = CREATE_ERROR;
-		}
-	      }
-	    }
-	    else {
-	      fprintf( stderr,
-		       "Error emitting entry in outer tarball for package content in output file %s\n",
-		       opts->output_file );
-	      status = CREATE_ERROR;
-	    }
-	    break;
-#endif /* PKGFMT_V2 */
-	  default:
-	    fprintf( stderr, "Internal error with get_version()\n" );
-	    status = CREATE_ERROR;
-	  }
-	}
-	else status = CREATE_ERROR;
-
-	if ( status == CREATE_SUCCESS ) {
-	  /*
-	   * scan_directory_tree() recursively walks the directory
-	   * tree starting from opts->input_directory, and assembles
-	   * the three rbtrees in pkginfo; the keys are paths starting
-	   * from the base of the directory tree, and the values are
-	   * create_dir_info, create_file_info or create_symlink_info
-	   * structures which can be used later to assemble the
-	   * pkgdescr entries in the correct order, and, in the case
-	   * of create_file_info, locate the needed files when we emit
-	   * the tarball.
-	   */
-
-	  result = scan_directory_tree( opts, pkginfo );
-	  if ( status == CREATE_SUCCESS ) {
-	    /*
-	     * Next, we iterate over the rbtrees that
-	     * scan_directory_tree() created, first pkginfo->dirs, then
-	     * files, then symlinks.  As we go, we assemble a pkg_descr,
-	     * which we will eventually write out to the
-	     * package-description file.  Also, for pkginfo->files, we
-	     * emit files to the output package as we go.  Thus,
-	     * package-description is emitted last, after all of the
-	     * package contents.
-	     */
-
-	    result = build_pkg_descr( opts, pkginfo, emit_tw, &descr );
-	    if ( result != CREATE_SUCCESS ) status = result;
-	  }
-	  else {
-	    fprintf( stderr,
-		     "Failed to scan directory tree %s for package build\n",
-		     opts->input_directory );
-	    status = result;
-	  }
-	} /* else problems with pkg_tw/emit_tw */
-
-	/* Close down emit_tw/pkg_tw, etc. */
-	switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-	case V1:
-	  /*
-	   * In V1,emit_tw == pkg_tw, so we don't need to do anything
-	   * special for it here; pkg_tw is closed later anyway.
-	   */
-	  emit_tw = NULL;
-	  break;
-#endif
-#ifdef PKGFMT_V2
-	case V2:
-	  /*
-	   * In V2, we need to close emit_tw and the underlying
-	   * write_streams here, and then emit the
-	   * package-description.
-	   */
-	  if ( emit_tw ) {
-	    close_tar_writer( emit_tw );
-	    emit_tw = NULL;
-	  }
-	  /* content_ws is either content_out_ws or comp_ws */
-	  content_ws = NULL;
-	  if ( comp_ws) {
-	    close_write_stream( comp_ws );
-	    comp_ws = NULL;
-	  }
-	  if ( content_out_ws ) {
-	    /*
-	     * This is where everything gets flushed out to the outer
-	     * tarball.
-	     */
-	    close_write_stream( content_out_ws );
-	    content_out_ws = NULL;
-	  }
-	  break;
-#endif
-	default:
-	  fprintf( stderr, "Internal error with get_version()\n" );
-	  status = CREATE_ERROR;
-	}
-
-	if ( status == CREATE_SUCCESS ) {
-	  /* TODO emit package-description to pkg_tw */
-	}
-
-	/* Now we close down pkg_tw */
-	if ( pkg_tw ) {
-	  close_tar_writer( pkg_tw );
-	  pkg_tw = NULL;
-	}
-      } /* else problems getting ws ready */
-
-      /*
-       * Close ws/comp_s/out_ws, and remove the output file in case of
-       * error.
-       */
-
-      ws = NULL;
-      switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-      case V1:
-	if ( comp_ws ) {
-	  close_write_stream( comp_ws );
-	  comp_ws = NULL;
-	}
-	break;
-#endif
-#ifdef PKGFMT_V2
-      case V2:
-	/* Don't need to do anything in this case */
-	break;
-#endif
-      }
-      close_write_stream( out_ws );
-      out_ws = NULL;
-      /* Remove the output if we had an error with it */
-      if ( status != CREATE_SUCCESS ) unlink( opts->output_file );
-      
       free_pkginfo( pkginfo );
     }
     else {
       fprintf( stderr, "Unable to allocate memory\n" );
     }
   }
+  /* else can't-happen error */
 }
+
+#ifdef PKGFMT_V1
+
+static int check_path_for_descr( const char *path ) {
+  int result;
+  char *temp, *cmp, *marker;
+
+  /*
+   * Check if the first component of path is package-description; if
+   * it is, then this path is disallowed in V1 format packages.
+   */
+  result = 0;
+  if ( path ) {
+    temp = copy_string( path );
+    if ( temp ) {
+      cmp = get_path_component( temp, &marker );
+      if ( cmp && strcmp( cmp, "package-description" ) == 0 ) result = 1;
+      free( temp );
+    }
+    /* Signal error */
+    else result = -1;
+  }
+
+  return result;
+}
+
+#endif /* PKGFMT_V1 */
 
 void create_main( int argc, char **argv ) {
   int result;
@@ -839,7 +811,7 @@ void create_main( int argc, char **argv ) {
   if ( opts ) {
     set_default_opts( opts );
     result = create_parse_options( opts, argc, argv );
-    if ( result == CREATE_SUCCESS ) create_build_pkg( opts );
+    if ( result == CREATE_SUCCESS ) build_pkg( opts );
     free_create_opts( opts );
   }
   else {
@@ -1041,6 +1013,61 @@ static void dir_info_free( void *v ) {
   }
 }
 
+static int emit_files( create_opts *opts, create_pkg_info *pkginfo,
+		       tar_writer *tw ) {
+  int status, result;
+  rbtree_node *n;
+  char *path, *tar_filename;
+  void *info_v;
+  create_file_info *fi;
+  tar_file_info ti;
+
+  status = CREATE_SUCCESS;
+  if ( opts && pkginfo && tw ) {
+    if ( pkginfo->files && pkginfo->files_count > 0 ) {
+      n = NULL;
+      do {
+	fi = NULL;
+	path = rbtree_enum( pkginfo->files, n, &info_v, &n );
+	if ( path ) {
+	  if ( info_v ) {
+	    fi = (create_file_info *)info_v;
+
+	    /* Strip off leading slashes */
+	    tar_filename = path;
+	    while ( *tar_filename == '/' ) ++tar_filename;
+	    /* Now emit the file */
+	    ti.type = TAR_FILE;
+	    strncpy( ti.filename, tar_filename,
+		     TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
+	    strncpy( ti.target, "", TAR_TARGET_LEN + 1 );
+	    ti.owner = 0;
+	    ti.group = 0;
+	    ti.mode = 0600;
+	    ti.mtime = get_pkg_mtime( pkginfo );
+	    result = emit_file( fi->src_path, &ti, tw );
+	    if ( result != CREATE_SUCCESS ) {
+	      fprintf( stderr, "Error emitting file %s\n", fi->src_path );
+	      status = result;
+	    }
+	  }
+	  else {
+	    fprintf( stderr,
+		     "Internal error while emitting package files (path %s)\n",
+		     path );
+	    status = CREATE_ERROR;
+	  }
+	}
+	/* else nothing to do */
+      } while ( n && status == CREATE_SUCCESS );
+    }
+    /* else nothing to do */
+  }
+  else status = CREATE_ERROR;
+
+  return status;
+}
+
 static void * file_info_copier( void *v ) {
   create_file_info *fi, *rfi;
 
@@ -1090,6 +1117,119 @@ static void file_info_free( void *v ) {
     if ( fi->group ) free( fi->group );
 
     free( fi );
+  }
+}
+
+static void finish_content( create_opts *opts, create_pkg_streams *streams ) {
+  if ( opts && streams ) {
+    switch ( get_version( opts ) ) {
+#ifdef PKGFMT_V1
+    case V1:
+      /*
+       * In V1, emit_tw == pkg_tw, so we don't need to do anything
+       * special for it here; pkg_tw is closed in finish_streams().
+       */
+      streams->emit_tw = NULL;
+      streams->content_ws = NULL;
+      streams->content_out_ws = NULL;
+      break;
+#endif
+#ifdef PKGFMT_V2
+    case V2:
+      /*
+       * In V2, we need to close emit_tw and the underlying
+       * write_streams here.
+       */
+      if ( streams->emit_tw ) {
+	close_tar_writer( streams->emit_tw );
+	streams->emit_tw = NULL;
+      }
+      /* content_ws is either content_out_ws or comp_ws */
+      streams->content_ws = NULL;
+      if ( streams->comp_ws ) {
+	close_write_stream( streams->comp_ws );
+	streams->comp_ws = NULL;
+      }
+      if ( streams->content_out_ws ) {
+	/*
+	 * This is where everything gets flushed out to the outer
+	 * tarball.
+	 */
+	close_write_stream( streams->content_out_ws );
+	streams->content_out_ws = NULL;
+      }
+      break;
+#endif
+    default:
+      fprintf( stderr, "Internal error with get_version()\n" );
+    }
+  }
+}
+
+static void finish_streams( create_opts *opts, create_pkg_streams *streams ) {
+  if ( opts && streams ) {
+    /* Make sure we aren't emitting content */
+    switch ( get_version( opts ) ) {
+#ifdef PKGFMT_V1
+    case V1:
+      /*
+       * In V1, emit_tw is just pkg_tw, and content_ws/content_out_ws
+       * are NULL
+       */
+      streams->emit_tw = NULL;
+      streams->content_out_ws = NULL;
+      streams->content_ws = NULL;
+      break;
+#endif /* PKGFMT_V1 */
+#ifdef PKGFMT_V2
+    case V2:
+      if ( streams->emit_tw ) {
+	close_tar_writer( streams->emit_tw );
+	streams->emit_tw = NULL;
+      }
+      /* content_ws is just comp_ws or content_out_ws */
+      streams->content_ws = NULL;
+      if ( streams->comp_ws ) {
+	close_write_stream( streams->comp_ws );
+	streams->comp_ws = NULL;
+      }
+      if ( streams->content_out_ws ) {
+	close_write_streams( streams->content_out_ws );
+	streams->content_out_ws = NULL;
+      }
+      break;
+#endif /* PKGFMT_V2 */
+    default:
+      fprintf( stderr, "Internal error with get_version()\n" );
+    }
+
+    /* First, close pkg_tw */
+    if ( streams->pkg_tw ) {
+      close_tar_writer( streams->pkg_tw );
+      streams->pkg_tw = NULL;
+    }
+
+    /*
+     * ws is either out_ws or comp_ws, so just set it to NULL
+     * without closing it.
+     */
+    streams->ws = NULL;
+#ifdef PKGFMT_V1
+    if ( get_version( opts ) == V1 ) {
+      if ( streams->comp_ws ) {
+	close_write_stream( streams->comp_ws );
+	streams->comp_ws = NULL;
+      }
+    }
+#endif
+
+    /* Now we have comp_ws closed if needed, so do out_ws */
+    if ( streams->out_ws ) {
+      close_write_stream( streams->out_ws );
+      streams->out_ws = NULL;
+    }
+
+    free( streams );
   }
 }
 
@@ -1185,6 +1325,338 @@ static create_version_opt get_version( create_opts *opts ) {
 #endif
 
   return result;
+}
+
+static int prepare_streams_for_content( create_opts *opts,
+					create_pkg_info *pkginfo,
+					create_pkg_streams *streams ) {
+  int status;
+
+  status = CREATE_SUCCESS;
+  if ( opts && pkginfo && streams ) {
+    if ( streams->pkg_tw ) {
+      switch ( get_version( opts ) ) {
+#ifdef PKGFMT_V1
+      case V1:
+	/* We just emit straight to the outer tar_writer in V1 */
+	streams->emit_tw = streams->pkg_tw;
+	streams->content_out_ws = NULL;
+	streams->content_ws = NULL;
+	break;
+#endif /* PKGFMT_V1 */
+#ifdef PKGFMT_V2
+      case V2:
+	streams->ti_outer.type = TAR_FILE;
+	switch ( get_compression( opts ) ) {
+	case NONE:
+	  strncpy( streams->ti_outer.filename, "package-content.tar",
+		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
+	  break;
+#ifdef COMPRESSION_GZIP
+	case GZIP:
+	  strncpy( streams->ti_outer.filename, "package-content.tar.gz",
+		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
+	  break;
+#endif /* COMPRESSION_GZIP */
+#ifdef COMPRESSION_BZIP2
+	case BZIP2:
+	  strncpy( streams->ti_outer.filename, "package-content.tar.bz2",
+		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
+	  break;
+#endif /* COMPRESSION_BZIP2 */
+	default:
+	  fprintf( stderr, "Internal error with get_compression()\n" );
+	  status = CREATE_ERROR;
+	}
+	strncpy( streams->ti_outer.target, "", TAR_TARGET_LEN + 1 );
+	streams->ti_outer.owner = 0;
+	streams->ti_outer.group = 0;
+	streams->ti_outer.mode = 0755;
+	streams->ti_outer.mtime = get_pkg_mtime( pkginfo );
+
+	if ( status == CREATE_SUCCESS ) {
+	  streams->content_out_ws =
+	    put_next_file( streams->pkg_tw, &(streams->ti_outer) );
+	  if ( streams->content_out_ws ) {
+	    switch ( get_compression( opts ) ) {
+	    case NONE:
+	      streams->content_ws = streams->content_out_ws;
+	      break;
+#ifdef COMPRESSION_GZIP
+	    case GZIP:
+	      /* We reuse comp_ws, since V2 didn't use it in prepare_streams() */
+	      streams->comp_ws =
+		open_write_stream_from_stream_gzip( streams->content_out_ws );
+	      if ( streams->comp_ws )
+		streams->content_ws = streams->comp_ws;
+	      else {
+		fprintf( stderr,
+			 "Error setting up gzip compressed stream for inner content tarball in output file %s\n",
+			 opts->output_file );
+		status = CREATE_ERROR;
+	      }
+	      break;
+#endif /* COMPRESSION_GZIP */
+#ifdef COMPRESSION_BZIP2
+	    case BZIP2:
+	      /* We reuse comp_ws, since V2 didn't use it in prepare_streams() */
+	      streams->comp_ws =
+		open_write_stream_from_stream_bzip2( streams->content_out_ws );
+	      if ( streams->comp_ws )
+		streams->content_ws = streams->comp_ws;
+	      else {
+		fprintf( stderr,
+			 "Error setting up bzip2 compressed stream for inner content tarball in output file %s\n",
+			 opts->output_file );
+		status = CREATE_ERROR;
+	      }
+	      break;
+#endif /* COMPRESSION_BZIP2 */
+	    default:
+	      fprintf( stderr, "Internal error with get_compression()\n" );
+	      status = CREATE_ERROR;
+	    }
+
+	    if ( status == CREATE_SUCCESS ) {
+	      /*
+	       * content_ws will be write_stream for the compressed
+	       * content tarball; fit emit_tw to it.
+	       */
+	      streams->emit_tw = start_tar_writer( streams->content_ws );
+	      if ( !(streams->emit_tw) ) {
+		fprintf( stderr,
+			 "Error writing inner content tarball in output file %s\n",
+			 opts->output_file );
+		status = CREATE_ERROR;
+	      }
+	    }
+	  }
+	  else {
+	    fprintf( stderr,
+		     "Error emitting entry in outer tarball for package content in output file %s\n",
+		     opts->output_file );
+	    status = CREATE_ERROR;
+	  }
+	  break;
+#endif /* PKGFMT_V2 */
+	default:
+	  fprintf( stderr, "Internal error with get_version()\n" );
+	  status = CREATE_ERROR;
+	}
+      }
+
+      /* Clean up if we had a problem */
+      if ( status != CREATE_SUCCESS ) {
+	switch ( get_version( opts ) ) {
+#ifdef PKGFMT_V1
+	case V1:
+	  streams->emit_tw = NULL;
+	  streams->content_ws = NULL;
+	  streams->content_out_ws = NULL;
+	  break;
+#endif /* PKGFMT_V1 */
+#ifdef PKGFMT_V2
+	case V2:
+	  if ( streams->emit_tw ) {
+	    close_tar_writer( streams->emit_tw );
+	    streams->emit_tw = NULL;
+	  }
+	  streams->content_ws = NULL;
+	  if ( streams->comp_ws ) {
+	    close_write_stream( streams->comp_ws );
+	    streams->comp_ws = NULL;
+	  }
+	  if ( streams->content_out_ws ) {
+	    close_write_stream( streams->content_out_ws );
+	    streams->content_out_ws = NULL;
+	  }
+	  break;
+#endif /* PKGFMT_V2 */
+	default:
+	  fprintf( stderr, "Internal error with get_version()\n" );
+	}
+      }
+    }
+    else status = CREATE_ERROR;
+  }
+  else status = CREATE_ERROR;
+
+  return status;
+}
+
+static create_pkg_streams * prepare_streams( create_opts *opts ) {
+  int status, result;
+  create_pkg_streams *streams;
+  struct stat st;
+
+  streams = NULL;
+  status = CREATE_SUCCESS;
+  if ( opts ) {
+    streams = malloc( sizeof( *streams ) );
+    if ( streams ) {
+      streams->out_ws = NULL;
+      streams->comp_ws = NULL;
+      streams->ws = NULL;
+      streams->pkg_tw = NULL;
+#ifdef PKGFMT_V2
+      memset( &(streams->ti_outer), sizeof( streams->ti_outer ), 0 );
+      /* tar_file_info for use with the outer tarball in V2 */
+      streams->content_out_ws = NULL;
+      streams->content_ws = NULL;
+#endif /* PKGFMT_V2 */
+      streams->emit_tw = NULL;
+
+      /* Clear the output file if it exists */
+      result = lstat( opts->output_file, &st );
+      if ( result == 0 ) {
+	/* lstat() succeeded, so it exists */
+	if ( S_ISREG( st.st_mode ) || S_ISLNK( st.st_mode ) ) {
+	  result = unlink( opts->output_file );
+	  if ( result != 0 ) {
+	    fprintf( stderr, "Couldn't remove existing file at %s: %s\n",
+		     opts->output_file, strerror( errno ) );
+	    status = CREATE_ERROR;
+	  }
+	}
+	else {
+	  fprintf( stderr,
+		   "%s already exists and is not a regular file or symlink\n",
+		   opts->output_file );
+	  status = CREATE_ERROR;
+	}
+      }
+      else {
+	if ( errno != ENOENT ) {
+	  fprintf( stderr, "Couldn't stat %s: %s\n",
+		   opts->output_file, strerror( errno ) );
+	  status = CREATE_ERROR;
+	}
+	/* else it didn't exist, nothing to do */
+      }
+
+      if ( status == CREATE_SUCCESS ) {
+	/*
+	 * We need to set up the output file here.  For a V1 package, we
+	 * set up the appropriate compression stream, and then fit a
+	 * tar_writer to it, and then emit files into that, and emit a
+	 * package-description at the end.  For a V2 package, we open a
+	 * bare write_stream and fit a tar_writer to it.  In
+	 * prepare_streams_for_content(), we will start writing a single
+	 * file called package-content.tar{|.bz2|.gz}, fit a compression
+	 * stream to that if needed, then fit another tar_writer to
+	 * that, and emit files.  When we're done emitting files, we
+	 * close that tar writer and emit package-description (in
+	 * build_pkg()) in the outer tarball.
+	 */
+
+	streams->out_ws = open_write_stream_none( opts->output_file );
+	if ( streams->out_ws ) {
+	  switch ( get_version( opts ) ) {
+#ifdef PKGFMT_V1
+	  case V1:
+	    switch ( get_compression( opts ) ) {
+	    case NONE:
+	      streams->ws = streams->out_ws;
+	      break;
+#ifdef COMPRESSION_GZIP
+	    case GZIP:
+	      streams->comp_ws =
+		open_write_stream_from_stream_gzip( streams->out_ws );
+	      if ( streams->comp_ws ) {
+		streams->ws = streams->comp_ws;
+	      }
+	      else {
+		fprintf( stderr,
+			 "Unable to open gzip output stream for file %s\n",
+			 opts->output_file );
+		status = CREATE_ERROR;
+	      }
+	      break;
+#endif /* COMPRESSION_GZIP */
+#ifdef COMPRESSION_BZIP2
+	    case BZIP2:
+	      streams->comp_ws = 
+		open_write_stream_from_stream_bzip2( streams->out_ws );
+	      if ( streams->comp_ws ) {
+		streams->ws = streams->comp_ws;
+	      }
+	      else {
+		fprintf( stderr,
+			 "Unable to open bzip2 output stream for file %s\n",
+			 opts->output_file );
+		status = CREATE_ERROR;
+	      }
+	      break;
+#endif /* COMPRESSION_BZIP2 */
+	    default:
+	      fprintf( stderr, "Internal error with get_compression()\n" );
+	      status = CREATE_ERROR;
+	    }
+	    break;
+#endif /* PKGFMT_V1 */
+#ifdef PKGFMT_V2
+	  case V2:
+	    streams->ws = streams->out_ws;
+	    break;
+#endif /* PKGFMT_V2 */
+	  default:
+	    fprintf( stderr, "Internal error with get_version()\n" );
+	    status = CREATE_ERROR;
+	  }
+	}
+	else {
+	  fprintf( stderr,
+		   "Unable to open output file %s\n",
+		   opts->output_file );
+	  status = CREATE_ERROR;
+	}
+      }
+
+      /*
+       * if we have CREATE_SUCCESS here, ws has been initialized and
+       * is ready for the tar_writer.
+       */
+
+      if ( status == CREATE_SUCCESS ) {
+	/*
+	 * At this point, we have ws (which is identical to either
+	 * out_ws or comp_ws), and we can set up the outer tar writer
+	 * on it.
+	 */
+
+	streams->pkg_tw = start_tar_writer( streams->ws );
+	if ( !(streams->pkg_tw) ) status = CREATE_ERROR;
+      }
+
+      if ( status != CREATE_SUCCESS ) {
+	if ( streams->pkg_tw ) {
+	  close_tar_writer( streams->pkg_tw );
+	  streams->pkg_tw = NULL;
+	}
+	/* ws is just out_ws or comp_ws, so set it to NULL without closing */
+	streams->ws = NULL;
+	if ( streams->comp_ws ) {
+	  close_write_stream( streams->comp_ws );
+	  streams->comp_ws = NULL;
+	}
+	if ( streams->out_ws ) {
+	  close_write_stream( streams->out_ws );
+	  streams->out_ws = NULL;
+	  /* Make sure we remove the file we created when we opened out_ws */
+	  unlink( opts->output_file );
+	}
+	free( streams );
+	streams = NULL;
+      }
+    }
+    else {
+      fprintf( stderr, "Unable to allocate memory\n" );
+      /* it's already NULL */
+    }
+  }
+  /* else it's already NULL */
+
+  return streams;
 }
 
 static int scan_directory_tree_internal( create_opts *opts,
