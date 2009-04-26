@@ -1516,66 +1516,74 @@ static void guess_compression_and_version_from_filename( create_opts *opts ) {
 #ifdef PKGFMT_V1
 # ifdef COMPRESSION_BZIP2
     len = strlen( v1bz2_postfix );
-    temp = opts->output_file + ( n - len );
-    if ( strcmp( temp, v1bz2_postfix ) == 0 ) {
-      /*
-       * Don't guess from filename if we've already seen settings
-       * inconsistent with it
-       */
-      if ( ( opts->compression == DEFAULT ||
-	     opts->compression == BZIP2 ) &&
-	   ( opts->version == DEFAULT ||
-	     opts->version == V1 ) ) {
-	opts->compression = BZIP2;
-	opts->version = V1;
+    if ( n > len ) {
+      temp = opts->output_file + ( n - len );
+      if ( strcmp( temp, v1bz2_postfix ) == 0 ) {
+	/*
+	 * Don't guess from filename if we've already seen settings
+	 * inconsistent with it
+	 */
+	if ( ( opts->compression == DEFAULT_COMPRESSION ||
+	       opts->compression == BZIP2 ) &&
+	     ( opts->version == DEFAULT_VERSION ||
+	       opts->version == V1 ) ) {
+	  opts->compression = BZIP2;
+	  opts->version = V1;
+	}
       }
     }
 # endif /* COMPRESSION_BZIP2 */
 # ifdef COMPRESSION_GZIP
     len = strlen( v1gz_postfix );
-    temp = opts->output_file + ( n - len );
-    if ( strcmp( temp, v1gz_postfix ) == 0 ) {
-      /*
-       * Don't guess from filename if we've already seen settings
-       * inconsistent with it
-       */
-      if ( ( opts->compression == DEFAULT ||
-	     opts->compression == GZIP ) &&
-	   ( opts->version == DEFAULT ||
-	     opts->version == V1 ) ) {
-	opts->compression = GZIP;
-	opts->version = V1;
+    if ( n >len ) {
+      temp = opts->output_file + ( n - len );
+      if ( strcmp( temp, v1gz_postfix ) == 0 ) {
+	/*
+	 * Don't guess from filename if we've already seen settings
+	 * inconsistent with it
+	 */
+	if ( ( opts->compression == DEFAULT_COMPRESSION ||
+	       opts->compression == GZIP ) &&
+	     ( opts->version == DEFAULT_VERSION ||
+	       opts->version == V1 ) ) {
+	  opts->compression = GZIP;
+	  opts->version = V1;
+	}
       }
     }
 # endif /* COMPRESSION_GZIP */
     len = strlen( v1none_postfix );
-    temp = opts->output_file + ( n - len );
-    if ( strcmp( temp, v1none_postfix ) == 0 ) {
-      /*
-       * Don't guess from filename if we've already seen settings
-       * inconsistent with it
-       */
-      if ( ( opts->compression == DEFAULT ||
-	     opts->compression == NONE ) &&
-	   ( opts->version == DEFAULT ||
-	     opts->version == V1 ) ) {
-	opts->compression = NONE;
-	opts->version = V1;
+    if ( n > len ) {
+      temp = opts->output_file + ( n - len );
+      if ( strcmp( temp, v1none_postfix ) == 0 ) {
+	/*
+	 * Don't guess from filename if we've already seen settings
+	 * inconsistent with it
+	 */
+	if ( ( opts->compression == DEFAULT_COMPRESSION ||
+	       opts->compression == NONE ) &&
+	     ( opts->version == DEFAULT_VERSION ||
+	       opts->version == V1 ) ) {
+	  opts->compression = NONE;
+	  opts->version = V1;
+	}
       }
     }
 #endif /* PKGFMT_V1 */
 #ifdef PKGFMT_V2
     len = strlen( v2_postfix );
-    temp = opts->output_file + ( n - len );
-    if ( strcmp( temp, v2_postfix ) == 0 ) {
-      /*
-       * Don't guess from filename if we've already seen settings
-       * inconsistent with it (V2 can't infer compression from
-       * filename)
-       */
-      if ( opts->version == DEFAULT ||
-	   opts->version == V2 ) {
-	opts->version = V2;
+    if ( n > len ) {
+      temp = opts->output_file + ( n - len );
+      if ( strcmp( temp, v2_postfix ) == 0 ) {
+	/*
+	 * Don't guess from filename if we've already seen settings
+	 * inconsistent with it (V2 can't infer compression from
+	 * filename)
+	 */
+	if ( opts->version == DEFAULT_VERSION ||
+	     opts->version == V2 ) {
+	  opts->version = V2;
+	}
       }
     }
 #endif /* PKGFMT_V2 */
