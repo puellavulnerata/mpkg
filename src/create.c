@@ -172,7 +172,7 @@ static create_pkg_info * alloc_pkginfo( create_opts *opts ) {
        */
 
       if ( get_dirs_enabled( opts ) && !error ) {
-	temp->dirs = rbtree_alloc( pre_path_comparator,
+	temp->dirs = rbtree_alloc( post_path_comparator,
 				   rbtree_string_copier,
 				   rbtree_string_free,
 				   dir_info_copier,
@@ -181,7 +181,7 @@ static create_pkg_info * alloc_pkginfo( create_opts *opts ) {
       }
 
       if ( get_files_enabled( opts ) && !error ) {
-	temp->files = rbtree_alloc( pre_path_comparator,
+	temp->files = rbtree_alloc( post_path_comparator,
 				    rbtree_string_copier,
 				    rbtree_string_free,
 				    file_info_copier,
@@ -190,7 +190,7 @@ static create_pkg_info * alloc_pkginfo( create_opts *opts ) {
       }
 
       if ( get_symlinks_enabled( opts ) && !error ) {
-	temp->symlinks = rbtree_alloc( pre_path_comparator,
+	temp->symlinks = rbtree_alloc( post_path_comparator,
 				       rbtree_string_copier,
 				       rbtree_string_free,
 				       symlink_info_copier,
@@ -285,11 +285,6 @@ static int build_pkg_descr_dirs( create_opts *opts, create_pkg_info *pkginfo,
 			free( descr->entries[i].owner );
 		      if ( descr->entries[i].group )
 			free( descr->entries[i].group );
-		      /*
-		       * Mark it as the last one for when we
-		       * free if we have an error.
-		       */
-		      descr->entries[i].type = ENTRY_LAST;
 		      fprintf( stderr, "Unable to allocate memory\n" );
 		      status = CREATE_ERROR;
 		    }
@@ -406,11 +401,6 @@ static int build_pkg_descr_files( create_opts *opts, create_pkg_info *pkginfo,
 			free( descr->entries[i].owner );
 		      if ( descr->entries[i].group )
 			free( descr->entries[i].group );
-		      /*
-		       * Mark it as the last one for when we
-		       * free if we have an error.
-		       */
-		      descr->entries[i].type = ENTRY_LAST;
 		      fprintf( stderr, "Unable to allocate memory\n" );
 		      status = CREATE_ERROR;
 		    }
@@ -528,12 +518,6 @@ static int build_pkg_descr_symlinks( create_opts *opts, create_pkg_info *pkginfo
 			free( descr->entries[i].group );
 		      if ( descr->entries[i].u.s.target )
 			free( descr->entries[i].u.s.target );
-
-		      /*
-		       * Mark it as the last one for when we
-		       * free if we have an error.
-		       */
-		      descr->entries[i].type = ENTRY_LAST;
 		      fprintf( stderr, "Unable to allocate memory\n" );
 		      status = CREATE_ERROR;
 		    }
@@ -602,13 +586,16 @@ static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
 	descr->num_entries_alloced += pkginfo->files_count;
       if ( get_symlinks_enabled( opts ) )
 	descr->num_entries_alloced += pkginfo->symlinks_count;
-      ++(descr->num_entries_alloced); /* Allow for ENTRY_LAST */
 
       if ( descr->num_entries_alloced > 0 ) {
 	descr->entries =
 	  malloc( sizeof( *(descr->entries) ) *
 		  descr->num_entries_alloced );
-	if ( !(descr->entries) ) {
+	if ( descr->entries ) {
+	  memset( descr->entries, sizeof( *(descr->entries) ) *
+		  descr->num_entries_alloced, 0 );
+	}
+	else {
 	  fprintf( stderr, "Unable to allocate memory\n" );
 	  descr->num_entries_alloced = 0;
 	  status = CREATE_ERROR;
@@ -644,23 +631,6 @@ static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
 	  if ( result != CREATE_SUCCESS ) status = result;
 	}
 	/* else nothing to do for symlinks */
-
-	/* Add an ENTRY_LAST, and we're done */
-	if ( status == CREATE_SUCCESS ) {
-	  i = descr->num_entries;
-	  if ( i < descr->num_entries_alloced ) {
-	    descr->entries[i].type = ENTRY_LAST;
-	    descr->entries[i].filename = NULL;
-	    descr->entries[i].owner = NULL;
-	    descr->entries[i].group = NULL;
-	    ++(descr->num_entries);
-	  }
-	  else {
-	    fprintf( stderr,
-		     "Internal error during package creation (ran out of pkg_descr_entry slots at ENTRY_LAST)\n" );
-	    status = CREATE_ERROR;
-	  }
-	}
       }
 
       if ( status == CREATE_SUCCESS ) *descr_out = descr;
@@ -685,6 +655,7 @@ static void build_pkg( create_opts *opts ) {
   create_pkg_streams *streams;
   pkg_descr *descr;
 
+  status = CREATE_SUCCESS;
   if ( opts ) {
     pkginfo = alloc_pkginfo( opts );
     if ( pkginfo ) {
@@ -703,7 +674,7 @@ static void build_pkg( create_opts *opts ) {
        */
 
       result = scan_directory_tree( opts, pkginfo );
-      if ( status == CREATE_SUCCESS ) {
+      if ( result == CREATE_SUCCESS ) {
 	/* Construct the pkg_descr */
 	result = build_pkg_descr( opts, pkginfo, &descr );
 	if ( result != CREATE_SUCCESS ) status = result;	 
