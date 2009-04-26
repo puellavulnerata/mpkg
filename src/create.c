@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <grp.h>
 #include <pwd.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <pkg.h>
@@ -43,7 +44,8 @@ typedef enum {
 } create_version_opt;
 
 typedef struct {
-  char *input_directory, *output_file;
+  char *input_directory, *output_file,*pkg_name;
+  time_t pkg_mtime;
   create_compression_opt compression;
   create_version_opt version;
   create_boolean_opt dirs, files, symlinks;
@@ -129,10 +131,13 @@ static void free_pkginfo( create_pkg_info * );
 static create_compression_opt get_compression( create_opts * );
 static int get_dirs_enabled( create_opts * );
 static int get_files_enabled( create_opts * );
-static time_t get_pkg_mtime( create_pkg_info * );
+static time_t get_pkg_mtime( create_opts * );
 static char * get_pkg_name( create_opts * );
 static int get_symlinks_enabled( create_opts * );
 static create_version_opt get_version( create_opts * );
+static void guess_compression_and_version_from_filename( create_opts * );
+static char * guess_pkg_name_from_input_directory( const char * );
+static char * guess_pkg_name_from_output_file( const char * );
 static int prepare_streams_for_content( create_opts *, create_pkg_info *,
 					create_pkg_streams * );
 static create_pkg_streams * prepare_streams( create_opts * );
@@ -141,6 +146,7 @@ static int scan_directory_tree_internal( create_opts *, create_pkg_info *,
 static int scan_directory_tree( create_opts *, create_pkg_info * );
 static int set_compression_arg( create_opts *, char * );
 static void set_default_opts( create_opts * );
+static int set_pkg_time_arg( create_opts *, char * );
 static int set_version_arg( create_opts *, char * );
 static void * symlink_info_copier( void * );
 static void symlink_info_free( void * );
@@ -585,7 +591,7 @@ static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
 	fprintf( stderr, "Unable to allocate memory\n" );
 	status = CREATE_ERROR;
       }
-      descr->hdr.pkg_time = get_pkg_mtime( pkginfo );
+      descr->hdr.pkg_time = get_pkg_mtime( opts );
       descr->num_entries = 0;
       descr->num_entries_alloced = 0;
 
@@ -891,6 +897,15 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
 	    status = CREATE_ERROR;
 	  }	  
 	}
+	else if ( strcmp( argv[i], "--set-pkg-time" ) == 0 ) {
+	  if ( i + 1 < argc )
+	    status = set_pkg_time_arg( opts, argv[i + 1] );
+	  else {
+	    fprintf( stderr,
+		     "The --set-pkg-time option requires a parameter; try \'mpkg help create\'\n" );
+	    status = CREATE_ERROR;
+	  }
+	}
 	else if ( strcmp( argv[i], "--set-version" ) == 0 ) {
 	  if ( i + 1 < argc )
 	    status = set_version_arg( opts, argv[i + 1] );
@@ -912,24 +927,57 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
     }
 
     if ( status == CREATE_SUCCESS ) {
-      if ( i + 2 == argc ) {
+      if ( i + 2 == argc || i + 3 == argc ) {
 	temp = get_current_dir();
 	if ( temp ) {
 	  opts->input_directory = concatenate_paths( temp, argv[i] );
-	  opts->output_file = concatenate_paths( temp, argv[i + 1] );
-	  if ( !( opts->input_directory && opts->output_file ) ) {
-	    if ( opts->input_directory ) {
-	      free( opts->input_directory );
-	      opts->input_directory = NULL;
+	  if ( i + 2 == argc) {
+	    opts->output_file = concatenate_paths( temp, argv[i + 1] );
+	    opts->pkg_name =
+	      guess_pkg_name_from_output_file( opts->output_file );
+	    if ( !(opts->pkg_name) ) {
+	      opts->pkg_name =
+		guess_pkg_name_from_input_directory( opts->input_directory );
+	      if ( !(opts->pkg_name) ) {
+		fprintf( stderr,
+			 "Unable to guess package name, and it wasn't specified in the command.\n" );
+		status = CREATE_ERROR;
+	      }
 	    }
-	    if ( opts->output_file ) {
-	      free( opts->output_file );
-	      opts->output_file = NULL;
-	    }
+	  }
+	  else {
+	    opts->output_file = concatenate_paths( temp, argv[i + 2] );
+	    opts->pkg_name = copy_string( argv[i + 1] );
+	  }
 
-	    fprintf( stderr,
-		     "Unable to allocate memory trying to create package\n" );
-	    status = CREATE_ERROR;
+	  if ( status == CREATE_SUCCESS ) {
+	    if ( !( opts->input_directory && opts->output_file &&
+		    opts->pkg_name ) ) {
+	      if ( opts->input_directory ) {
+		free( opts->input_directory );
+		opts->input_directory = NULL;
+	      }
+	      if ( opts->output_file ) {
+		free( opts->output_file );
+		opts->output_file = NULL;
+	      }
+	      if ( opts->pkg_name ) {
+		free( opts->pkg_name );
+		opts->pkg_name = NULL;
+	      }
+
+	      fprintf( stderr,
+		       "Unable to allocate memory trying to create package\n" );
+	      status = CREATE_ERROR;
+	    }
+	  }
+	  /*
+	   * else CREATE_ERROR was already set, so we had trouble
+	   * guessing pkg_name
+	   */
+
+	  if ( status == CREATE_SUCCESS ) {
+	    guess_compression_and_version_from_filename( opts );
 	  }
 
 	  free( temp );
@@ -954,7 +1002,7 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
 	else {
 	  fprintf( stderr,
 		   "There are %d excess arguments; try \'mpkg help create\'\n",
-		   argc - ( i + 2 ) );
+		   argc - ( i + 3 ) );
 	  status = CREATE_ERROR;
 	}
       }
@@ -1044,7 +1092,7 @@ static int emit_files( create_opts *opts, create_pkg_info *pkginfo,
 	    ti.owner = 0;
 	    ti.group = 0;
 	    ti.mode = 0600;
-	    ti.mtime = get_pkg_mtime( pkginfo );
+	    ti.mtime = get_pkg_mtime( opts );
 	    result = emit_file( fi->src_path, &ti, tw );
 	    if ( result != CREATE_SUCCESS ) {
 	      fprintf( stderr, "Error emitting file %s\n", fi->src_path );
@@ -1237,6 +1285,7 @@ static void free_create_opts( create_opts *opts ) {
   if ( opts ) {
     if ( opts->input_directory ) free( opts->input_directory );
     if ( opts->output_file ) free( opts->output_file );
+    if ( opts->pkg_name ) free( opts->pkg_name );
     free( opts );
   }
 }
@@ -1292,6 +1341,24 @@ static int get_files_enabled( create_opts *opts ) {
   return result;
 }
 
+static time_t get_pkg_mtime( create_opts *opts ) {
+  time_t result;
+
+  if ( opts ) result = opts->pkg_mtime;
+  else result = 0;
+
+  return result;
+}
+
+static char * get_pkg_name( create_opts *opts ) {
+  char *result;
+
+  if ( opts ) result = opts->pkg_name;
+  else result = NULL;
+
+  return result;
+}
+
 static int get_symlinks_enabled( create_opts *opts ) {
   int result;
 
@@ -1323,6 +1390,134 @@ static create_version_opt get_version( create_opts *opts ) {
 #  error At least one of PKGFMT_V1 or PKGFMT_V2 must be defined
 # endif
 #endif
+
+  return result;
+}
+
+static void guess_compression_and_version_from_filename( create_opts *opts ) {
+  int n, len;
+  char *temp;
+#ifdef PKGFMT_V1
+# ifdef COMPRESSION_BZIP2
+  const char *v1bz2_postfix = ".tar.bz2";
+# endif /* COMPRESSION_BZIP2 */
+# ifdef COMPRESSION_GZIP
+  const char *v1gz_postfix = ".tar.gz";
+# endif /* COMPRESSION_GZIP */
+  const char *v1none_postfix = ".tar";
+#endif /* PKGFMT_V1 */
+#ifdef PKGFMT_V2
+  const char *v2_postfix = ".mpkg";
+#endif /* PKGFMT_V2 */
+
+  if ( opts && opts->output_file ) {
+    n = strlen( opts->output_file );
+#ifdef PKGFMT_V1
+# ifdef COMPRESSION_BZIP2
+    len = strlen( v1bz2_postfix );
+    temp = opts->output_file + ( n - len );
+    if ( strcmp( temp, v1bz2_postfix ) == 0 ) {
+      /*
+       * Don't guess from filename if we've already seen settings
+       * inconsistent with it
+       */
+      if ( ( opts->compression == DEFAULT ||
+	     opts->compression == BZIP2 ) &&
+	   ( opts->version == DEFAULT ||
+	     opts->version == V1 ) ) {
+	opts->compression = BZIP2;
+	opts->version = V1;
+      }
+    }
+# endif /* COMPRESSION_BZIP2 */
+# ifdef COMPRESSION_GZIP
+    len = strlen( v1gz_postfix );
+    temp = opts->output_file + ( n - len );
+    if ( strcmp( temp, v1gz_postfix ) == 0 ) {
+      /*
+       * Don't guess from filename if we've already seen settings
+       * inconsistent with it
+       */
+      if ( ( opts->compression == DEFAULT ||
+	     opts->compression == GZIP ) &&
+	   ( opts->version == DEFAULT ||
+	     opts->version == V1 ) ) {
+	opts->compression = GZIP;
+	opts->version = V1;
+      }
+    }
+# endif /* COMPRESSION_GZIP */
+    len = strlen( v1none_postfix );
+    temp = opts->output_file + ( n - len );
+    if ( strcmp( temp, v1none_postfix ) == 0 ) {
+      /*
+       * Don't guess from filename if we've already seen settings
+       * inconsistent with it
+       */
+      if ( ( opts->compression == DEFAULT ||
+	     opts->compression == NONE ) &&
+	   ( opts->version == DEFAULT ||
+	     opts->version == V1 ) ) {
+	opts->compression = NONE;
+	opts->version = V1;
+      }
+    }
+#endif /* PKGFMT_V1 */
+#ifdef PKGFMT_V2
+    len = strlen( v2_postfix );
+    temp = opts->output_file + ( n - len );
+    if ( strcmp( temp, v2_postfix ) == 0 ) {
+      /*
+       * Don't guess from filename if we've already seen settings
+       * inconsistent with it (V2 can't infer compression from
+       * filename)
+       */
+      if ( opts->version == DEFAULT ||
+	   opts->version == V2 ) {
+	opts->version = V2;
+      }
+    }
+#endif /* PKGFMT_V2 */
+  }
+}
+
+static char * guess_pkg_name_from_input_directory( const char *indir ) {
+  char *lcmp, *result;
+
+  result = NULL;
+  if ( indir ) {
+    lcmp = get_last_component( indir );
+    if ( lcmp ) result = lcmp;
+  }
+
+  return result;
+}
+
+static char * guess_pkg_name_from_output_file( const char *outfile ) {
+  char *lcmp, *result;
+  int n, len;
+
+  result = NULL;
+  if ( outfile ) {
+    lcmp = get_last_component( outfile );
+    if ( lcmp ) {
+      /* Strip off any extension and guess the part before the first . */
+      len = strlen( lcmp );
+      n = 0;
+      while ( lcmp[n] != '.' && n < len ) ++n;
+      if ( n > 0 ) {
+	result = malloc( sizeof( *result ) * ( n + 1 ) );
+	if ( result ) {
+	  memcpy( result, lcmp, sizeof( *result ) * n );
+	  result[n + 1] = '\0';
+	}
+	/* else fail due to malloc() failure */
+      }
+      /* else it starts with ., give up */
+
+      free( lcmp );
+    }
+  }
 
   return result;
 }
@@ -1372,7 +1567,7 @@ static int prepare_streams_for_content( create_opts *opts,
 	streams->ti_outer.owner = 0;
 	streams->ti_outer.group = 0;
 	streams->ti_outer.mode = 0755;
-	streams->ti_outer.mtime = get_pkg_mtime( pkginfo );
+	streams->ti_outer.mtime = get_pkg_mtime( opts );
 
 	if ( status == CREATE_SUCCESS ) {
 	  streams->content_out_ws =
@@ -2022,11 +2217,32 @@ static int set_compression_arg( create_opts *opts, char *arg ) {
 static void set_default_opts( create_opts *opts ) {
   opts->input_directory = NULL;
   opts->output_file = NULL;
+  opts->pkg_name = NULL;
+  opts->pkg_mtime = time( NULL );
   opts->compression = DEFAULT_COMPRESSION;
   opts->version = DEFAULT_VERSION;
   opts->files = DEFAULT;
   opts->dirs = DEFAULT;
   opts->symlinks = DEFAULT;
+}
+
+static int set_pkg_time_arg( create_opts *opts, char *arg ) {
+  int result;
+  long t;
+
+  result = CREATE_SUCCESS;
+  if ( opts && arg ) {
+    if ( sscanf( arg, "%ld", &t ) == 1 ) {
+      opts->pkg_mtime = (time_t)t;
+    }
+    else {
+      fprintf( stderr, "Unable to parse time \"%s\".\n", arg );
+      result = CREATE_ERROR;
+    }
+  }
+  else result = CREATE_ERROR;
+
+  return result;
 }
 
 static int set_version_arg( create_opts *opts, char *arg ) {
