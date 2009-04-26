@@ -119,7 +119,7 @@ static int check_path_for_descr( const char * );
 static int create_parse_options( create_opts *, int, char ** );
 static void * dir_info_copier( void * );
 static void dir_info_free( void * );
-static int emit_descr( pkg_descr *, tar_writer * );
+static int emit_descr( create_opts *, pkg_descr *, tar_writer * );
 static int emit_file( const char *, tar_file_info *, tar_writer * );
 static int emit_files( create_opts *, create_pkg_info *, tar_writer * );
 static void * file_info_copier( void * );
@@ -246,7 +246,7 @@ static int build_pkg_descr_dirs( create_opts *opts, create_pkg_info *pkginfo,
 	       * with the package contents.
 	       */
 
-	      if ( get_version_opt( opts ) == V1 ) {
+	      if ( get_version( opts ) == V1 ) {
 		result = check_path_for_descr( path );
 		if ( result == 1 ) {
 		  fprintf( stderr,
@@ -365,7 +365,7 @@ static int build_pkg_descr_files( create_opts *opts, create_pkg_info *pkginfo,
 	       * with the package contents.
 	       */
 
-	      if ( get_version_opt( opts ) == V1 ) {
+	      if ( get_version( opts ) == V1 ) {
 		result = check_path_for_descr( path );
 		if ( result == 1 ) {
 		  fprintf( stderr,
@@ -486,7 +486,7 @@ static int build_pkg_descr_symlinks( create_opts *opts, create_pkg_info *pkginfo
 	       * with the package contents.
 	       */
 
-	      if ( get_version_opt( opts ) == V1 ) {
+	      if ( get_version( opts ) == V1 ) {
 		result = check_path_for_descr( path );
 		if ( result == 1 ) {
 		  fprintf( stderr,
@@ -721,7 +721,7 @@ static void build_pkg( create_opts *opts ) {
 	if ( status == CREATE_SUCCESS ) {
 	  streams = prepare_streams( opts );
 	  if ( streams ) {
-	    result = emit_descr( descr, streams->pkg_tw );
+	    result = emit_descr( opts, descr, streams->pkg_tw );
 	    if ( result != CREATE_SUCCESS ) {
 	      fprintf( stderr, "Unable to emit package-description\n" );
 	      status = result;
@@ -1061,6 +1061,127 @@ static void dir_info_free( void *v ) {
   }
 }
 
+static int emit_descr( create_opts * opts, pkg_descr *descr,
+		       tar_writer *tw ) {
+  int status, result, fd, len;
+  char *tmpl; /* template for mkstemp() */
+  const char *descr_name = "package-description";
+  tar_file_info ti;
+
+  status = CREATE_SUCCESS;
+  if ( opts && descr && tw ) {
+    /*
+     * The temporary name is
+     * get_temp()/package-description.getpid().XXXXXX
+     */
+
+    /*
+     * 4 chars for /, . twice and the terminating \0, plus six for the
+     * XXXXXX, leaves 22 for getpid(), which is more than sufficient.
+     */
+    len = strlen( get_temp() ) + strlen( descr_name ) + 32;
+    tmpl = malloc( sizeof( *tmpl ) * len );
+    if ( tmpl ) {
+      snprintf( tmpl, len, "%s/%s.%d.XXXXXX",
+		get_temp(), descr_name, getpid() );
+      result = canonicalize_path( tmpl );
+      if ( result == 0 ) {
+	fd = mkstemp( tmpl );
+	if ( fd >= 0 ) {
+	  close( fd );
+	  result = write_pkg_descr_to_file( descr, tmpl );
+	  if ( result == 0 ) {
+	    strncpy( ti.filename, descr_name,
+		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
+	    strncpy( ti.target, "", TAR_TARGET_LEN + 1 );
+	    ti.owner = 0;
+	    ti.group = 0;
+	    ti.mode = 0644;
+	    ti.mtime = get_pkg_mtime( opts );
+	    
+	    /* Now emit it */
+	    result = emit_file( tmpl, &ti, tw );
+	    if ( result != CREATE_SUCCESS ) {
+	      fprintf( stderr, "Couldn't emit %s to tarball\n", descr_name );
+	      status = result;
+	    }
+	  }
+	  else {
+	    fprintf( stderr,
+		     "Couldn't write package description to temp file %s\n",
+		     tmpl );
+	    status = CREATE_ERROR;
+	  }
+
+	  /* Clear out the temp file when we're done */
+	  unlink( tmpl );
+	}
+	else {
+	  fprintf( stderr,
+		   "Couldn't mkstemp( %s ) emitting %s: %s\n",
+		   tmpl, descr_name, strerror( errno ) );
+	  status = CREATE_ERROR;
+	}
+      }
+      else {
+	fprintf( stderr,
+		 "Couldn't canonicalize path emitting %s\n", descr_name );
+	status = CREATE_ERROR;
+      }
+      free( tmpl );
+    }
+    else {
+      fprintf( stderr,
+	       "Unable to allocate memory emitting %s\n", descr_name );
+      status = CREATE_ERROR;
+    }
+  }
+  else status = CREATE_ERROR;
+
+  return status;
+}
+
+#define EMIT_BUF_LEN 1024
+
+static int emit_file( const char *src, tar_file_info *ti, tar_writer *tw ) {
+  int status;
+  read_stream *rs;
+  write_stream *ws;
+  char buf[EMIT_BUF_LEN];
+  long len;
+
+  status = CREATE_SUCCESS;
+  if ( src && ti && tw ) {
+    rs = open_read_stream_none( src );
+    if ( rs ) {
+      ws = put_next_file( tw, ti );
+      if ( ws ) {
+	while ( ( len = read_from_stream( rs, buf, EMIT_BUF_LEN ) ) > 0 ) {
+	  if ( write_to_stream( ws, buf, len ) != len ) {
+	    fprintf( stderr, "Unable to write to tarball for %s\n", src );
+	    status = CREATE_ERROR;
+	    break;
+	  }
+	}
+	close_write_stream( ws );
+      }
+      else {
+	fprintf( stderr,
+		 "Unable to open write stream to tarball for %s\n", src );
+	status = CREATE_ERROR;
+      }
+      close_read_stream( rs );
+    }
+    else {
+      fprintf( stderr, "Unable to read from file %s\n", src );
+      status = CREATE_ERROR;
+    }
+  }
+  else status = CREATE_ERROR;
+
+  return status;
+}
+
 static int emit_files( create_opts *opts, create_pkg_info *pkginfo,
 		       tar_writer *tw ) {
   int status, result;
@@ -1091,7 +1212,7 @@ static int emit_files( create_opts *opts, create_pkg_info *pkginfo,
 	    strncpy( ti.target, "", TAR_TARGET_LEN + 1 );
 	    ti.owner = 0;
 	    ti.group = 0;
-	    ti.mode = 0600;
+	    ti.mode = 0644;
 	    ti.mtime = get_pkg_mtime( opts );
 	    result = emit_file( fi->src_path, &ti, tw );
 	    if ( result != CREATE_SUCCESS ) {
@@ -1242,7 +1363,7 @@ static void finish_streams( create_opts *opts, create_pkg_streams *streams ) {
 	streams->comp_ws = NULL;
       }
       if ( streams->content_out_ws ) {
-	close_write_streams( streams->content_out_ws );
+	close_write_stream( streams->content_out_ws );
 	streams->content_out_ws = NULL;
       }
       break;
@@ -1566,7 +1687,7 @@ static int prepare_streams_for_content( create_opts *opts,
 	strncpy( streams->ti_outer.target, "", TAR_TARGET_LEN + 1 );
 	streams->ti_outer.owner = 0;
 	streams->ti_outer.group = 0;
-	streams->ti_outer.mode = 0755;
+	streams->ti_outer.mode = 0644;
 	streams->ti_outer.mtime = get_pkg_mtime( opts );
 
 	if ( status == CREATE_SUCCESS ) {
