@@ -2353,13 +2353,13 @@ static int set_version_arg( create_opts *opts, char *arg ) {
   if ( opts && arg ) {
     if ( opts->version == DEFAULT_VERSION ) {
 #ifdef PKGFMT_V1
-      if ( strcmp( arg, "v1" ) == 0 ) opts->compression = V1;
+      if ( strcmp( arg, "v1" ) == 0 ) opts->version = V1;
 # ifdef PKGFMT_V2
-      else if ( strcmp( arg, "v2" ) == 0 ) opts->compression = V2;
+      else if ( strcmp( arg, "v2" ) == 0 ) opts->version = V2;
 # endif
 #else
 # ifdef PKGFMT_V2
-      if ( strcmp( arg, "v2" ) == 0 ) opts->compression = V2;
+      if ( strcmp( arg, "v2" ) == 0 ) opts->version = V2;
 # else
 #  error At least one of PKGFMT_V1 or PKGFMT_V2 must be defined
 # endif
