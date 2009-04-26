@@ -860,8 +860,11 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
 	  }
 	}
 	else if ( strcmp( argv[i], "--set-compression" ) == 0 ) {
-	  if ( i + 1 < argc )
+	  if ( i + 1 < argc ) {
 	    status = set_compression_arg( opts, argv[i + 1] );
+	    /* Consume the extra arg */
+	    ++i;
+	  }
 	  else {
 	    fprintf( stderr,
 		     "The --set-compression option requires a parameter; try \'mpkg help create\'\n" );
@@ -869,8 +872,11 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
 	  }	  
 	}
 	else if ( strcmp( argv[i], "--set-pkg-time" ) == 0 ) {
-	  if ( i + 1 < argc )
+	  if ( i + 1 < argc ) {
 	    status = set_pkg_time_arg( opts, argv[i + 1] );
+	    /* Consume the extra arg */
+	    ++i;
+	  }
 	  else {
 	    fprintf( stderr,
 		     "The --set-pkg-time option requires a parameter; try \'mpkg help create\'\n" );
@@ -878,13 +884,16 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
 	  }
 	}
 	else if ( strcmp( argv[i], "--set-version" ) == 0 ) {
-	  if ( i + 1 < argc )
+	  if ( i + 1 < argc ) {
 	    status = set_version_arg( opts, argv[i + 1] );
+	    /* Consume the extra arg */
+	    ++i;
+	  }
 	  else {
 	    fprintf( stderr,
 		     "The --set-version option requires a parameter; try \'mpkg help create\'\n" );
 	    status = CREATE_ERROR;
-	  }	  
+	  }
 	}
 	else {
 	  fprintf( stderr,
