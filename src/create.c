@@ -677,7 +677,7 @@ static void build_pkg( create_opts *opts ) {
       if ( result == CREATE_SUCCESS ) {
 	/* Construct the pkg_descr */
 	result = build_pkg_descr( opts, pkginfo, &descr );
-	if ( result != CREATE_SUCCESS ) status = result;	 
+	if ( result != CREATE_SUCCESS ) status = result;
 
 	/* Now we can free the directory and symlink rbtrees */
 	if ( pkginfo->dirs ) {
@@ -699,6 +699,9 @@ static void build_pkg( create_opts *opts ) {
 	    }
 
 	    if ( status == CREATE_SUCCESS ) {
+	      /* We can free descr here */
+	      free_pkg_descr( descr );
+	      descr = NULL;
 	      /* Get ready to emit content */
 	      result = prepare_streams_for_content( opts, pkginfo, streams );
 	      if ( result == CREATE_SUCCESS ) {
@@ -726,6 +729,12 @@ static void build_pkg( create_opts *opts ) {
 		     opts->output_file );
 	    status = CREATE_ERROR;
 	  }
+
+	  /*
+	   * Make sure we free descr if we didn't get far enough to
+	   * use and free it above.
+	   */
+	  if ( descr ) free_pkg_descr( descr );
 	}
 	else {
 	  fprintf( stderr, "Unable to build package-description\n" );
