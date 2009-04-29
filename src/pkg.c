@@ -15,6 +15,7 @@ struct cmd_s {
   char *name;
   void (*callback)( int, char ** );
 } cmd_table[] = {
+  { "convert", convert_main },
   { "create", create_main },
   { "createdb", createdb_main },
   { "help", help_callback },

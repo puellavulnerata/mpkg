@@ -1,6 +1,7 @@
 #ifndef __PKG_H__
 #define __PKG_H__
 
+#include <convert.h>
 #include <create.h>
 #include <createdb.h>
 #include <emit.h>

@@ -4,7 +4,7 @@ INCLUDE_FLAGS=-I../include
 LIBS=
 
 OBJS=\
-	create.o createdb.o emit.o install.o md5.o pkg.o pkgdb.o \
+	convert.o create.o createdb.o emit.o install.o md5.o pkg.o pkgdb.o \
 	pkgdb_text_file.o pkgdescr.o pkgglobal.o pkgpath.o pkgutil.o rbtree.o \
 	remove.o streams_none.o streams.o tar.o unpack.o
 
