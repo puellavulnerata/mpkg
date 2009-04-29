@@ -3,6 +3,8 @@
 
 #include <streams.h>
 
+#include <sys/types.h>
+
 #define TAR_SUCCESS 0
 #define TAR_NO_MORE_FILES -1
 #define TAR_UNEXPECTED_EOF -2

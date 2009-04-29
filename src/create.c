@@ -22,32 +22,9 @@ typedef enum {
   DEFAULT
 } create_boolean_opt;
 
-typedef enum {
-  NONE,
-#ifdef COMPRESSION_GZIP
-  GZIP,
-#endif
-#ifdef COMPRESSION_BZIP2
-  BZIP2,
-#endif
-  DEFAULT_COMPRESSION
-} create_compression_opt;
-
-typedef enum {
-#ifdef PKGFMT_V1
-    V1,
-#endif
-#ifdef PKGFMT_V2
-    V2,
-#endif
-    DEFAULT_VERSION
-} create_version_opt;
-
 typedef struct {
-  char *input_directory, *output_file,*pkg_name;
-  time_t pkg_mtime;
-  create_compression_opt compression;
-  create_version_opt version;
+  char *input_directory, *pkg_name;
+  emit_opts *emit;
   create_boolean_opt dirs, files, symlinks;
 } create_opts;
 
@@ -73,37 +50,7 @@ typedef struct {
   int dirs_count, files_count, symlinks_count;
 } create_pkg_info;
 
-typedef struct {
-  /* Bare ws for the output file */
-  write_stream *out_ws;
-  /*
-   * Compressed ws wrapped around out_ws for V1, and around content_ws
-   * during content emission for V2
-   */
-  write_stream *comp_ws;
-  /*
-   * Either out_ws or comp_ws, depending on version and compression.
-   * We attach the outer tar_writer to this.
-   */
-  write_stream *ws;
-  /* The outer tar_writer for V2, the only tar_writer for V1 */
-  tar_writer *pkg_tw;
-#ifdef PKGFMT_V2
-  /* tar_file_info for the content tarball's entry in the outer tarball */
-  tar_file_info ti_outer;
-  /* The bare ws for the package-content.tar.{|gz|bz2} file */
-  write_stream *content_out_ws;
-  /* We use comp_ws for the compressed ws around it in the V2 case */
-  /* content_ws is either comp_ws or content_out_ws, as appropriate */
-  write_stream *content_ws;
-#endif /* PKGFMT_V2 */
-  /*
-   * This is the tar_writer to emit files to.  It will be just pkg_tw
-   * for V1, and will be the inner tar_writer for V2
-   */
-  tar_writer *emit_tw;
-} create_pkg_streams;
-
+static create_opts * alloc_create_opts( void );
 static create_pkg_info * alloc_pkginfo( create_opts * );
 static int build_pkg_descr_dirs( create_opts *, create_pkg_info *,
 				 pkg_descr * );
@@ -124,23 +71,15 @@ static int emit_file( const char *, tar_file_info *, tar_writer * );
 static int emit_files( create_opts *, create_pkg_info *, tar_writer * );
 static void * file_info_copier( void * );
 static void file_info_free( void * );
-static void finish_content( create_opts *, create_pkg_streams * );
-static void finish_streams( create_opts *, create_pkg_streams * );
 static void free_create_opts( create_opts * );
 static void free_pkginfo( create_pkg_info * );
-static create_compression_opt get_compression( create_opts * );
 static int get_dirs_enabled( create_opts * );
 static int get_files_enabled( create_opts * );
 static time_t get_pkg_mtime( create_opts * );
 static char * get_pkg_name( create_opts * );
 static int get_symlinks_enabled( create_opts * );
-static create_version_opt get_version( create_opts * );
-static void guess_compression_and_version_from_filename( create_opts * );
 static char * guess_pkg_name_from_input_directory( const char * );
 static char * guess_pkg_name_from_output_file( const char * );
-static int prepare_streams_for_content( create_opts *, create_pkg_info *,
-					create_pkg_streams * );
-static create_pkg_streams * prepare_streams( create_opts * );
 static int scan_directory_tree_internal( create_opts *, create_pkg_info *,
 					 const char *, const char * );
 static int scan_directory_tree( create_opts *, create_pkg_info * );
@@ -150,6 +89,32 @@ static int set_pkg_time_arg( create_opts *, char * );
 static int set_version_arg( create_opts *, char * );
 static void * symlink_info_copier( void * );
 static void symlink_info_free( void * );
+
+static create_opts * alloc_create_opts( void ) {
+  create_opts *opts;
+
+  opts = malloc( sizeof( *opts ) );
+  if ( opts ) {
+    opts->input_directory = NULL;
+    opts->pkg_name = NULL;
+    opts->dirs = DEFAULT;
+    opts->files = DEFAULT;
+    opts->symlinks = DEFAULT;
+    opts->emit = malloc( sizeof( *(opts->emit) ) );
+    if ( opts->emit ) {
+      opts->emit->output_file = NULL;
+      opts->emit->pkg_mtime = 0;
+      opts->emit->compression = DEFAULT_COMPRESSION;
+      opts->emit->version = DEFAULT_VERSION;
+    }
+    else {
+      free( opts );
+      opts = NULL;
+    }
+  }
+
+  return opts;
+}
 
 static create_pkg_info * alloc_pkginfo( create_opts *opts ) {
   create_pkg_info *temp;
@@ -246,7 +211,7 @@ static int build_pkg_descr_dirs( create_opts *opts, create_pkg_info *pkginfo,
 	       * with the package contents.
 	       */
 
-	      if ( get_version( opts ) == V1 ) {
+	      if ( get_version( opts->emit ) == V1 ) {
 		result = check_path_for_descr( path );
 		if ( result == 1 ) {
 		  fprintf( stderr,
@@ -360,7 +325,7 @@ static int build_pkg_descr_files( create_opts *opts, create_pkg_info *pkginfo,
 	       * with the package contents.
 	       */
 
-	      if ( get_version( opts ) == V1 ) {
+	      if ( get_version( opts->emit ) == V1 ) {
 		result = check_path_for_descr( path );
 		if ( result == 1 ) {
 		  fprintf( stderr,
@@ -476,7 +441,7 @@ static int build_pkg_descr_symlinks( create_opts *opts, create_pkg_info *pkginfo
 	       * with the package contents.
 	       */
 
-	      if ( get_version( opts ) == V1 ) {
+	      if ( get_version( opts->emit ) == V1 ) {
 		result = check_path_for_descr( path );
 		if ( result == 1 ) {
 		  fprintf( stderr,
@@ -652,7 +617,7 @@ static int build_pkg_descr( create_opts *opts, create_pkg_info *pkginfo,
 static void build_pkg( create_opts *opts ) {
   int status, result;
   create_pkg_info *pkginfo;
-  create_pkg_streams *streams;
+  emit_pkg_streams *streams;
   pkg_descr *descr;
 
   status = CREATE_SUCCESS;
@@ -690,7 +655,7 @@ static void build_pkg( create_opts *opts ) {
 	}
 
 	if ( status == CREATE_SUCCESS ) {
-	  streams = prepare_streams( opts );
+	  streams = start_pkg_streams( opts->emit );
 	  if ( streams ) {
 	    result = emit_descr( opts, descr, streams->pkg_tw );
 	    if ( result != CREATE_SUCCESS ) {
@@ -703,30 +668,30 @@ static void build_pkg( create_opts *opts ) {
 	      free_pkg_descr( descr );
 	      descr = NULL;
 	      /* Get ready to emit content */
-	      result = prepare_streams_for_content( opts, pkginfo, streams );
-	      if ( result == CREATE_SUCCESS ) {
+	      result = start_pkg_content( opts->emit, streams );
+	      if ( result == EMIT_SUCCESS ) {
 		/* Now emit the files */
 		result = emit_files( opts, pkginfo, streams->emit_tw );
 		if ( result != CREATE_SUCCESS ) {
 		  fprintf( stderr, "Unable to emit package contents\n" );
 		  status = result;
 		}
-		finish_content( opts, streams );
+		finish_pkg_content( opts->emit, streams );
 	      }
 	      else {
 		fprintf( stderr, "Unable to emit package contents\n" );
-		status = result;
+		status = CREATE_ERROR;
 	      }
 	    }
 
-	    finish_streams( opts, streams );
+	    finish_pkg_streams( opts->emit, streams );
 	    /* Remove the output if we had an error with it */
-	    if ( status != CREATE_SUCCESS ) unlink( opts->output_file );
+	    if ( status != CREATE_SUCCESS ) unlink( opts->emit->output_file );
 	  }
 	  else {
 	    fprintf( stderr,
 		     "Unable to open output streams for %s\n",
-		     opts->output_file );
+		     opts->emit->output_file );
 	    status = CREATE_ERROR;
 	  }
 
@@ -793,7 +758,7 @@ void create_main( int argc, char **argv ) {
   int result;
   create_opts *opts;
 
-  opts = malloc( sizeof( *opts ) );
+  opts = alloc_create_opts();
   if ( opts ) {
     set_default_opts( opts );
     result = create_parse_options( opts, argc, argv );
@@ -921,9 +886,9 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
 	if ( temp ) {
 	  opts->input_directory = concatenate_paths( temp, argv[i] );
 	  if ( i + 2 == argc) {
-	    opts->output_file = concatenate_paths( temp, argv[i + 1] );
+	    opts->emit->output_file = concatenate_paths( temp, argv[i + 1] );
 	    opts->pkg_name =
-	      guess_pkg_name_from_output_file( opts->output_file );
+	      guess_pkg_name_from_output_file( opts->emit->output_file );
 	    if ( !(opts->pkg_name) ) {
 	      opts->pkg_name =
 		guess_pkg_name_from_input_directory( opts->input_directory );
@@ -935,20 +900,20 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
 	    }
 	  }
 	  else {
-	    opts->output_file = concatenate_paths( temp, argv[i + 2] );
+	    opts->emit->output_file = concatenate_paths( temp, argv[i + 2] );
 	    opts->pkg_name = copy_string( argv[i + 1] );
 	  }
 
 	  if ( status == CREATE_SUCCESS ) {
-	    if ( !( opts->input_directory && opts->output_file &&
+	    if ( !( opts->input_directory && opts->emit->output_file &&
 		    opts->pkg_name ) ) {
 	      if ( opts->input_directory ) {
 		free( opts->input_directory );
 		opts->input_directory = NULL;
 	      }
-	      if ( opts->output_file ) {
-		free( opts->output_file );
-		opts->output_file = NULL;
+	      if ( opts->emit->output_file ) {
+		free( opts->emit->output_file );
+		opts->emit->output_file = NULL;
 	      }
 	      if ( opts->pkg_name ) {
 		free( opts->pkg_name );
@@ -966,7 +931,7 @@ int create_parse_options( create_opts *opts, int argc, char **argv ) {
 	   */
 
 	  if ( status == CREATE_SUCCESS ) {
-	    guess_compression_and_version_from_filename( opts );
+	    guess_compression_and_version_from_filename( opts->emit );
 	  }
 
 	  free( temp );
@@ -1278,124 +1243,11 @@ static void file_info_free( void *v ) {
   }
 }
 
-static void finish_content( create_opts *opts, create_pkg_streams *streams ) {
-  if ( opts && streams ) {
-    switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-    case V1:
-      /*
-       * In V1, emit_tw == pkg_tw, so we don't need to do anything
-       * special for it here; pkg_tw is closed in finish_streams().
-       */
-      streams->emit_tw = NULL;
-      streams->content_ws = NULL;
-      streams->content_out_ws = NULL;
-      break;
-#endif
-#ifdef PKGFMT_V2
-    case V2:
-      /*
-       * In V2, we need to close emit_tw and the underlying
-       * write_streams here.
-       */
-      if ( streams->emit_tw ) {
-	close_tar_writer( streams->emit_tw );
-	streams->emit_tw = NULL;
-      }
-      /* content_ws is either content_out_ws or comp_ws */
-      streams->content_ws = NULL;
-      if ( streams->comp_ws ) {
-	close_write_stream( streams->comp_ws );
-	streams->comp_ws = NULL;
-      }
-      if ( streams->content_out_ws ) {
-	/*
-	 * This is where everything gets flushed out to the outer
-	 * tarball.
-	 */
-	close_write_stream( streams->content_out_ws );
-	streams->content_out_ws = NULL;
-      }
-      break;
-#endif
-    default:
-      fprintf( stderr, "Internal error with get_version()\n" );
-    }
-  }
-}
-
-static void finish_streams( create_opts *opts, create_pkg_streams *streams ) {
-  if ( opts && streams ) {
-    /* Make sure we aren't emitting content */
-    switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-    case V1:
-      /*
-       * In V1, emit_tw is just pkg_tw, and content_ws/content_out_ws
-       * are NULL
-       */
-      streams->emit_tw = NULL;
-      streams->content_out_ws = NULL;
-      streams->content_ws = NULL;
-      break;
-#endif /* PKGFMT_V1 */
-#ifdef PKGFMT_V2
-    case V2:
-      if ( streams->emit_tw ) {
-	close_tar_writer( streams->emit_tw );
-	streams->emit_tw = NULL;
-      }
-      /* content_ws is just comp_ws or content_out_ws */
-      streams->content_ws = NULL;
-      if ( streams->comp_ws ) {
-	close_write_stream( streams->comp_ws );
-	streams->comp_ws = NULL;
-      }
-      if ( streams->content_out_ws ) {
-	close_write_stream( streams->content_out_ws );
-	streams->content_out_ws = NULL;
-      }
-      break;
-#endif /* PKGFMT_V2 */
-    default:
-      fprintf( stderr, "Internal error with get_version()\n" );
-    }
-
-    /* First, close pkg_tw */
-    if ( streams->pkg_tw ) {
-      close_tar_writer( streams->pkg_tw );
-      streams->pkg_tw = NULL;
-    }
-
-    /*
-     * ws is either out_ws or comp_ws, so just set it to NULL
-     * without closing it.
-     */
-    streams->ws = NULL;
-#ifdef PKGFMT_V1
-    if ( get_version( opts ) == V1 ) {
-      if ( streams->comp_ws ) {
-	close_write_stream( streams->comp_ws );
-	streams->comp_ws = NULL;
-      }
-    }
-#endif
-
-    /* Now we have comp_ws closed if needed, so do out_ws */
-    if ( streams->out_ws ) {
-      close_write_stream( streams->out_ws );
-      streams->out_ws = NULL;
-    }
-
-    free( streams );
-  }
-}
-
 static void free_create_opts( create_opts *opts ) {
   if ( opts ) {
     if ( opts->input_directory ) free( opts->input_directory );
-    if ( opts->output_file ) free( opts->output_file );
     if ( opts->pkg_name ) free( opts->pkg_name );
+    if ( opts->emit ) free_emit_opts( opts->emit );
     free( opts );
   }
 }
@@ -1407,28 +1259,6 @@ static void free_pkginfo( create_pkg_info *pkginfo ) {
     if ( pkginfo->symlinks ) rbtree_free( pkginfo->symlinks );
     free( pkginfo );
   }
-}
-
-static create_compression_opt get_compression( create_opts *opts ) {
-  create_compression_opt result;
-
-#ifdef COMPRESSION_BZIP2
-  /* Default to bzip2 if available */
-  result = BZIP2;
-#else
-# ifdef COMPRESSION_GZIP
-  /* Use gzip if we have that and no bzip2 */
-  result = GZIP;
-# else
-  /* No compression available */
-  result = NONE;
-# endif
-#endif
-
-  if ( opts && opts->compression != DEFAULT_COMPRESSION )
-    result = opts->compression;
-
-  return result;
 }
 
 static int get_dirs_enabled( create_opts *opts ) {
@@ -1454,7 +1284,7 @@ static int get_files_enabled( create_opts *opts ) {
 static time_t get_pkg_mtime( create_opts *opts ) {
   time_t result;
 
-  if ( opts ) result = opts->pkg_mtime;
+  if ( opts && opts->emit ) result = opts->emit->pkg_mtime;
   else result = 0;
 
   return result;
@@ -1477,126 +1307,6 @@ static int get_symlinks_enabled( create_opts *opts ) {
   else result = 1;
 
   return result;
-}
-
-static create_version_opt get_version( create_opts *opts ) {
-  create_version_opt result;
-
-#ifdef PKGFMT_V1
-# ifdef PKGFMT_V2
-  /* default to V2 if we have both */
-  result = V2;
-  /* The contents of the option only matter if we have V1 and V2 */
-  if ( opts && opts->version == V1 ) result = V1;
-# else
-  /* we have V1 but not V2 */
-  result = V1;
-# endif
-#else
-# ifdef PKGFMT_V2
-  /* we have V2 but not V1 */
-  result = V2;
-# else
-#  error At least one of PKGFMT_V1 or PKGFMT_V2 must be defined
-# endif
-#endif
-
-  return result;
-}
-
-static void guess_compression_and_version_from_filename( create_opts *opts ) {
-  int n, len;
-  char *temp;
-#ifdef PKGFMT_V1
-# ifdef COMPRESSION_BZIP2
-  const char *v1bz2_postfix = ".tar.bz2";
-# endif /* COMPRESSION_BZIP2 */
-# ifdef COMPRESSION_GZIP
-  const char *v1gz_postfix = ".tar.gz";
-# endif /* COMPRESSION_GZIP */
-  const char *v1none_postfix = ".tar";
-#endif /* PKGFMT_V1 */
-#ifdef PKGFMT_V2
-  const char *v2_postfix = ".mpkg";
-#endif /* PKGFMT_V2 */
-
-  if ( opts && opts->output_file ) {
-    n = strlen( opts->output_file );
-#ifdef PKGFMT_V1
-# ifdef COMPRESSION_BZIP2
-    len = strlen( v1bz2_postfix );
-    if ( n > len ) {
-      temp = opts->output_file + ( n - len );
-      if ( strcmp( temp, v1bz2_postfix ) == 0 ) {
-	/*
-	 * Don't guess from filename if we've already seen settings
-	 * inconsistent with it
-	 */
-	if ( ( opts->compression == DEFAULT_COMPRESSION ||
-	       opts->compression == BZIP2 ) &&
-	     ( opts->version == DEFAULT_VERSION ||
-	       opts->version == V1 ) ) {
-	  opts->compression = BZIP2;
-	  opts->version = V1;
-	}
-      }
-    }
-# endif /* COMPRESSION_BZIP2 */
-# ifdef COMPRESSION_GZIP
-    len = strlen( v1gz_postfix );
-    if ( n >len ) {
-      temp = opts->output_file + ( n - len );
-      if ( strcmp( temp, v1gz_postfix ) == 0 ) {
-	/*
-	 * Don't guess from filename if we've already seen settings
-	 * inconsistent with it
-	 */
-	if ( ( opts->compression == DEFAULT_COMPRESSION ||
-	       opts->compression == GZIP ) &&
-	     ( opts->version == DEFAULT_VERSION ||
-	       opts->version == V1 ) ) {
-	  opts->compression = GZIP;
-	  opts->version = V1;
-	}
-      }
-    }
-# endif /* COMPRESSION_GZIP */
-    len = strlen( v1none_postfix );
-    if ( n > len ) {
-      temp = opts->output_file + ( n - len );
-      if ( strcmp( temp, v1none_postfix ) == 0 ) {
-	/*
-	 * Don't guess from filename if we've already seen settings
-	 * inconsistent with it
-	 */
-	if ( ( opts->compression == DEFAULT_COMPRESSION ||
-	       opts->compression == NONE ) &&
-	     ( opts->version == DEFAULT_VERSION ||
-	       opts->version == V1 ) ) {
-	  opts->compression = NONE;
-	  opts->version = V1;
-	}
-      }
-    }
-#endif /* PKGFMT_V1 */
-#ifdef PKGFMT_V2
-    len = strlen( v2_postfix );
-    if ( n > len ) {
-      temp = opts->output_file + ( n - len );
-      if ( strcmp( temp, v2_postfix ) == 0 ) {
-	/*
-	 * Don't guess from filename if we've already seen settings
-	 * inconsistent with it (V2 can't infer compression from
-	 * filename)
-	 */
-	if ( opts->version == DEFAULT_VERSION ||
-	     opts->version == V2 ) {
-	  opts->version = V2;
-	}
-      }
-    }
-#endif /* PKGFMT_V2 */
-  }
 }
 
 static char * guess_pkg_name_from_input_directory( const char *indir ) {
@@ -1638,338 +1348,6 @@ static char * guess_pkg_name_from_output_file( const char *outfile ) {
   }
 
   return result;
-}
-
-static int prepare_streams_for_content( create_opts *opts,
-					create_pkg_info *pkginfo,
-					create_pkg_streams *streams ) {
-  int status;
-
-  status = CREATE_SUCCESS;
-  if ( opts && pkginfo && streams ) {
-    if ( streams->pkg_tw ) {
-      switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-      case V1:
-	/* We just emit straight to the outer tar_writer in V1 */
-	streams->emit_tw = streams->pkg_tw;
-	streams->content_out_ws = NULL;
-	streams->content_ws = NULL;
-	break;
-#endif /* PKGFMT_V1 */
-#ifdef PKGFMT_V2
-      case V2:
-	streams->ti_outer.type = TAR_FILE;
-	switch ( get_compression( opts ) ) {
-	case NONE:
-	  strncpy( streams->ti_outer.filename, "package-content.tar",
-		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
-	  break;
-#ifdef COMPRESSION_GZIP
-	case GZIP:
-	  strncpy( streams->ti_outer.filename, "package-content.tar.gz",
-		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
-	  break;
-#endif /* COMPRESSION_GZIP */
-#ifdef COMPRESSION_BZIP2
-	case BZIP2:
-	  strncpy( streams->ti_outer.filename, "package-content.tar.bz2",
-		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
-	  break;
-#endif /* COMPRESSION_BZIP2 */
-	default:
-	  fprintf( stderr, "Internal error with get_compression()\n" );
-	  status = CREATE_ERROR;
-	}
-	strncpy( streams->ti_outer.target, "", TAR_TARGET_LEN + 1 );
-	streams->ti_outer.owner = 0;
-	streams->ti_outer.group = 0;
-	streams->ti_outer.mode = 0644;
-	streams->ti_outer.mtime = get_pkg_mtime( opts );
-
-	if ( status == CREATE_SUCCESS ) {
-	  streams->content_out_ws =
-	    put_next_file( streams->pkg_tw, &(streams->ti_outer) );
-	  if ( streams->content_out_ws ) {
-	    switch ( get_compression( opts ) ) {
-	    case NONE:
-	      streams->content_ws = streams->content_out_ws;
-	      break;
-#ifdef COMPRESSION_GZIP
-	    case GZIP:
-	      /* We reuse comp_ws, since V2 didn't use it in prepare_streams() */
-	      streams->comp_ws =
-		open_write_stream_from_stream_gzip( streams->content_out_ws );
-	      if ( streams->comp_ws )
-		streams->content_ws = streams->comp_ws;
-	      else {
-		fprintf( stderr,
-			 "Error setting up gzip compressed stream for inner content tarball in output file %s\n",
-			 opts->output_file );
-		status = CREATE_ERROR;
-	      }
-	      break;
-#endif /* COMPRESSION_GZIP */
-#ifdef COMPRESSION_BZIP2
-	    case BZIP2:
-	      /* We reuse comp_ws, since V2 didn't use it in prepare_streams() */
-	      streams->comp_ws =
-		open_write_stream_from_stream_bzip2( streams->content_out_ws );
-	      if ( streams->comp_ws )
-		streams->content_ws = streams->comp_ws;
-	      else {
-		fprintf( stderr,
-			 "Error setting up bzip2 compressed stream for inner content tarball in output file %s\n",
-			 opts->output_file );
-		status = CREATE_ERROR;
-	      }
-	      break;
-#endif /* COMPRESSION_BZIP2 */
-	    default:
-	      fprintf( stderr, "Internal error with get_compression()\n" );
-	      status = CREATE_ERROR;
-	    }
-
-	    if ( status == CREATE_SUCCESS ) {
-	      /*
-	       * content_ws will be write_stream for the compressed
-	       * content tarball; fit emit_tw to it.
-	       */
-	      streams->emit_tw = start_tar_writer( streams->content_ws );
-	      if ( !(streams->emit_tw) ) {
-		fprintf( stderr,
-			 "Error writing inner content tarball in output file %s\n",
-			 opts->output_file );
-		status = CREATE_ERROR;
-	      }
-	    }
-	  }
-	  else {
-	    fprintf( stderr,
-		     "Error emitting entry in outer tarball for package content in output file %s\n",
-		     opts->output_file );
-	    status = CREATE_ERROR;
-	  }
-	  break;
-#endif /* PKGFMT_V2 */
-	default:
-	  fprintf( stderr, "Internal error with get_version()\n" );
-	  status = CREATE_ERROR;
-	}
-      }
-
-      /* Clean up if we had a problem */
-      if ( status != CREATE_SUCCESS ) {
-	switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-	case V1:
-	  streams->emit_tw = NULL;
-	  streams->content_ws = NULL;
-	  streams->content_out_ws = NULL;
-	  break;
-#endif /* PKGFMT_V1 */
-#ifdef PKGFMT_V2
-	case V2:
-	  if ( streams->emit_tw ) {
-	    close_tar_writer( streams->emit_tw );
-	    streams->emit_tw = NULL;
-	  }
-	  streams->content_ws = NULL;
-	  if ( streams->comp_ws ) {
-	    close_write_stream( streams->comp_ws );
-	    streams->comp_ws = NULL;
-	  }
-	  if ( streams->content_out_ws ) {
-	    close_write_stream( streams->content_out_ws );
-	    streams->content_out_ws = NULL;
-	  }
-	  break;
-#endif /* PKGFMT_V2 */
-	default:
-	  fprintf( stderr, "Internal error with get_version()\n" );
-	}
-      }
-    }
-    else status = CREATE_ERROR;
-  }
-  else status = CREATE_ERROR;
-
-  return status;
-}
-
-static create_pkg_streams * prepare_streams( create_opts *opts ) {
-  int status, result;
-  create_pkg_streams *streams;
-  struct stat st;
-
-  streams = NULL;
-  status = CREATE_SUCCESS;
-  if ( opts ) {
-    streams = malloc( sizeof( *streams ) );
-    if ( streams ) {
-      streams->out_ws = NULL;
-      streams->comp_ws = NULL;
-      streams->ws = NULL;
-      streams->pkg_tw = NULL;
-#ifdef PKGFMT_V2
-      memset( &(streams->ti_outer), sizeof( streams->ti_outer ), 0 );
-      /* tar_file_info for use with the outer tarball in V2 */
-      streams->content_out_ws = NULL;
-      streams->content_ws = NULL;
-#endif /* PKGFMT_V2 */
-      streams->emit_tw = NULL;
-
-      /* Clear the output file if it exists */
-      result = lstat( opts->output_file, &st );
-      if ( result == 0 ) {
-	/* lstat() succeeded, so it exists */
-	if ( S_ISREG( st.st_mode ) || S_ISLNK( st.st_mode ) ) {
-	  result = unlink( opts->output_file );
-	  if ( result != 0 ) {
-	    fprintf( stderr, "Couldn't remove existing file at %s: %s\n",
-		     opts->output_file, strerror( errno ) );
-	    status = CREATE_ERROR;
-	  }
-	}
-	else {
-	  fprintf( stderr,
-		   "%s already exists and is not a regular file or symlink\n",
-		   opts->output_file );
-	  status = CREATE_ERROR;
-	}
-      }
-      else {
-	if ( errno != ENOENT ) {
-	  fprintf( stderr, "Couldn't stat %s: %s\n",
-		   opts->output_file, strerror( errno ) );
-	  status = CREATE_ERROR;
-	}
-	/* else it didn't exist, nothing to do */
-      }
-
-      if ( status == CREATE_SUCCESS ) {
-	/*
-	 * We need to set up the output file here.  For a V1 package, we
-	 * set up the appropriate compression stream, and then fit a
-	 * tar_writer to it, and then emit files into that, and emit a
-	 * package-description at the end.  For a V2 package, we open a
-	 * bare write_stream and fit a tar_writer to it.  In
-	 * prepare_streams_for_content(), we will start writing a single
-	 * file called package-content.tar{|.bz2|.gz}, fit a compression
-	 * stream to that if needed, then fit another tar_writer to
-	 * that, and emit files.  When we're done emitting files, we
-	 * close that tar writer and emit package-description (in
-	 * build_pkg()) in the outer tarball.
-	 */
-
-	streams->out_ws = open_write_stream_none( opts->output_file );
-	if ( streams->out_ws ) {
-	  switch ( get_version( opts ) ) {
-#ifdef PKGFMT_V1
-	  case V1:
-	    switch ( get_compression( opts ) ) {
-	    case NONE:
-	      streams->ws = streams->out_ws;
-	      break;
-#ifdef COMPRESSION_GZIP
-	    case GZIP:
-	      streams->comp_ws =
-		open_write_stream_from_stream_gzip( streams->out_ws );
-	      if ( streams->comp_ws ) {
-		streams->ws = streams->comp_ws;
-	      }
-	      else {
-		fprintf( stderr,
-			 "Unable to open gzip output stream for file %s\n",
-			 opts->output_file );
-		status = CREATE_ERROR;
-	      }
-	      break;
-#endif /* COMPRESSION_GZIP */
-#ifdef COMPRESSION_BZIP2
-	    case BZIP2:
-	      streams->comp_ws = 
-		open_write_stream_from_stream_bzip2( streams->out_ws );
-	      if ( streams->comp_ws ) {
-		streams->ws = streams->comp_ws;
-	      }
-	      else {
-		fprintf( stderr,
-			 "Unable to open bzip2 output stream for file %s\n",
-			 opts->output_file );
-		status = CREATE_ERROR;
-	      }
-	      break;
-#endif /* COMPRESSION_BZIP2 */
-	    default:
-	      fprintf( stderr, "Internal error with get_compression()\n" );
-	      status = CREATE_ERROR;
-	    }
-	    break;
-#endif /* PKGFMT_V1 */
-#ifdef PKGFMT_V2
-	  case V2:
-	    streams->ws = streams->out_ws;
-	    break;
-#endif /* PKGFMT_V2 */
-	  default:
-	    fprintf( stderr, "Internal error with get_version()\n" );
-	    status = CREATE_ERROR;
-	  }
-	}
-	else {
-	  fprintf( stderr,
-		   "Unable to open output file %s\n",
-		   opts->output_file );
-	  status = CREATE_ERROR;
-	}
-      }
-
-      /*
-       * if we have CREATE_SUCCESS here, ws has been initialized and
-       * is ready for the tar_writer.
-       */
-
-      if ( status == CREATE_SUCCESS ) {
-	/*
-	 * At this point, we have ws (which is identical to either
-	 * out_ws or comp_ws), and we can set up the outer tar writer
-	 * on it.
-	 */
-
-	streams->pkg_tw = start_tar_writer( streams->ws );
-	if ( !(streams->pkg_tw) ) status = CREATE_ERROR;
-      }
-
-      if ( status != CREATE_SUCCESS ) {
-	if ( streams->pkg_tw ) {
-	  close_tar_writer( streams->pkg_tw );
-	  streams->pkg_tw = NULL;
-	}
-	/* ws is just out_ws or comp_ws, so set it to NULL without closing */
-	streams->ws = NULL;
-	if ( streams->comp_ws ) {
-	  close_write_stream( streams->comp_ws );
-	  streams->comp_ws = NULL;
-	}
-	if ( streams->out_ws ) {
-	  close_write_stream( streams->out_ws );
-	  streams->out_ws = NULL;
-	  /* Make sure we remove the file we created when we opened out_ws */
-	  unlink( opts->output_file );
-	}
-	free( streams );
-	streams = NULL;
-      }
-    }
-    else {
-      fprintf( stderr, "Unable to allocate memory\n" );
-      /* it's already NULL */
-    }
-  }
-  /* else it's already NULL */
-
-  return streams;
 }
 
 static int scan_directory_tree_internal( create_opts *opts,
@@ -2305,14 +1683,14 @@ static int set_compression_arg( create_opts *opts, char *arg ) {
   int result;
 
   result = CREATE_SUCCESS;
-  if ( opts && arg ) {
-    if ( opts->compression == DEFAULT_COMPRESSION ) {
-      if ( strcmp( arg, "none" ) == 0 ) opts->compression = NONE;
+  if ( opts && opts->emit && arg ) {
+    if ( opts->emit->compression == DEFAULT_COMPRESSION ) {
+      if ( strcmp( arg, "none" ) == 0 ) opts->emit->compression = NONE;
 #ifdef COMPRESSION_GZIP
-      else if ( strcmp( arg, "gzip" ) == 0 ) opts->compression = GZIP;
+      else if ( strcmp( arg, "gzip" ) == 0 ) opts->emit->compression = GZIP;
 #endif
 #ifdef COMPRESSION_BZIP2
-      else if ( strcmp( arg, "bzip2" ) == 0 ) opts->compression = BZIP2;
+      else if ( strcmp( arg, "bzip2" ) == 0 ) opts->emit->compression = BZIP2;
 #endif
       else {
 	fprintf( stderr,
@@ -2334,11 +1712,11 @@ static int set_compression_arg( create_opts *opts, char *arg ) {
 
 static void set_default_opts( create_opts *opts ) {
   opts->input_directory = NULL;
-  opts->output_file = NULL;
   opts->pkg_name = NULL;
-  opts->pkg_mtime = time( NULL );
-  opts->compression = DEFAULT_COMPRESSION;
-  opts->version = DEFAULT_VERSION;
+  opts->emit->output_file = NULL;
+  opts->emit->pkg_mtime = time( NULL );
+  opts->emit->compression = DEFAULT_COMPRESSION;
+  opts->emit->version = DEFAULT_VERSION;
   opts->files = DEFAULT;
   opts->dirs = DEFAULT;
   opts->symlinks = DEFAULT;
@@ -2351,7 +1729,7 @@ static int set_pkg_time_arg( create_opts *opts, char *arg ) {
   result = CREATE_SUCCESS;
   if ( opts && arg ) {
     if ( sscanf( arg, "%ld", &t ) == 1 ) {
-      opts->pkg_mtime = (time_t)t;
+      opts->emit->pkg_mtime = (time_t)t;
     }
     else {
       fprintf( stderr, "Unable to parse time \"%s\".\n", arg );
@@ -2368,15 +1746,15 @@ static int set_version_arg( create_opts *opts, char *arg ) {
 
   result = CREATE_SUCCESS;
   if ( opts && arg ) {
-    if ( opts->version == DEFAULT_VERSION ) {
+    if ( opts->emit->version == DEFAULT_VERSION ) {
 #ifdef PKGFMT_V1
-      if ( strcmp( arg, "v1" ) == 0 ) opts->version = V1;
+      if ( strcmp( arg, "v1" ) == 0 ) opts->emit->version = V1;
 # ifdef PKGFMT_V2
-      else if ( strcmp( arg, "v2" ) == 0 ) opts->version = V2;
+      else if ( strcmp( arg, "v2" ) == 0 ) opts->emit->version = V2;
 # endif
 #else
 # ifdef PKGFMT_V2
-      if ( strcmp( arg, "v2" ) == 0 ) opts->version = V2;
+      if ( strcmp( arg, "v2" ) == 0 ) opts->emit->version = V2;
 # else
 #  error At least one of PKGFMT_V1 or PKGFMT_V2 must be defined
 # endif

@@ -3,6 +3,7 @@
 
 #include <create.h>
 #include <createdb.h>
+#include <emit.h>
 #include <install.h>
 #include <md5.h>
 #include <pkgdb.h>
