@@ -1,14 +1,14 @@
 #ifndef __UNPACK_H__
 #define __UNPACK_H__
 
+#include <pkgtypes.h>
+
 typedef struct {
   pkg_descr *descr;
   char *descr_file;
   char *unpacked_dir;
-  enum {
-    PKG_VER_1,
-    PKG_VER_2
-  } version;
+  pkg_compression_t compression;
+  pkg_version_t version;
 } pkg_handle;
 
 void close_pkg( pkg_handle * );

@@ -11,6 +11,7 @@
 #include <pkgdescr.h>
 #include <pkgglobal.h>
 #include <pkgpath.h>
+#include <pkgtypes.h>
 #include <pkgutil.h>
 #include <rbtree.h>
 #include <remove.h>

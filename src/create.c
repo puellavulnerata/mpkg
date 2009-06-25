@@ -67,7 +67,6 @@ static int create_parse_options( create_opts *, int, char ** );
 static void * dir_info_copier( void * );
 static void dir_info_free( void * );
 static int emit_descr( create_opts *, pkg_descr *, tar_writer * );
-static int emit_file( const char *, tar_file_info *, tar_writer * );
 static int emit_files( create_opts *, create_pkg_info *, tar_writer * );
 static void * file_info_copier( void * );
 static void file_info_free( void * );
@@ -1055,9 +1054,9 @@ static int emit_descr( create_opts * opts, pkg_descr *descr,
 	    
 	    /* Now emit it */
 	    result = emit_file( tmpl, &ti, tw );
-	    if ( result != CREATE_SUCCESS ) {
+	    if ( result != EMIT_SUCCESS ) {
 	      fprintf( stderr, "Couldn't emit %s to tarball\n", descr_name );
-	      status = result;
+	      status = CREATE_ERROR;
 	    }
 	  }
 	  else {
@@ -1087,47 +1086,6 @@ static int emit_descr( create_opts * opts, pkg_descr *descr,
     else {
       fprintf( stderr,
 	       "Unable to allocate memory emitting %s\n", descr_name );
-      status = CREATE_ERROR;
-    }
-  }
-  else status = CREATE_ERROR;
-
-  return status;
-}
-
-#define EMIT_BUF_LEN 1024
-
-static int emit_file( const char *src, tar_file_info *ti, tar_writer *tw ) {
-  int status;
-  read_stream *rs;
-  write_stream *ws;
-  char buf[EMIT_BUF_LEN];
-  long len;
-
-  status = CREATE_SUCCESS;
-  if ( src && ti && tw ) {
-    rs = open_read_stream_none( src );
-    if ( rs ) {
-      ws = put_next_file( tw, ti );
-      if ( ws ) {
-	while ( ( len = read_from_stream( rs, buf, EMIT_BUF_LEN ) ) > 0 ) {
-	  if ( write_to_stream( ws, buf, len ) != len ) {
-	    fprintf( stderr, "Unable to write to tarball for %s\n", src );
-	    status = CREATE_ERROR;
-	    break;
-	  }
-	}
-	close_write_stream( ws );
-      }
-      else {
-	fprintf( stderr,
-		 "Unable to open write stream to tarball for %s\n", src );
-	status = CREATE_ERROR;
-      }
-      close_read_stream( rs );
-    }
-    else {
-      fprintf( stderr, "Unable to read from file %s\n", src );
       status = CREATE_ERROR;
     }
   }
@@ -1169,9 +1127,9 @@ static int emit_files( create_opts *opts, create_pkg_info *pkginfo,
 	    ti.mode = 0644;
 	    ti.mtime = get_pkg_mtime( opts );
 	    result = emit_file( fi->src_path, &ti, tw );
-	    if ( result != CREATE_SUCCESS ) {
+	    if ( result != EMIT_SUCCESS ) {
 	      fprintf( stderr, "Error emitting file %s\n", fi->src_path );
-	      status = result;
+	      status = CREATE_ERROR;
 	    }
 	  }
 	  else {

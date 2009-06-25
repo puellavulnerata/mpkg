@@ -7,35 +7,16 @@
 #include <sys/types.h>
 #include <time.h>
 
+#include <pkgtypes.h>
+
 #define EMIT_SUCCESS 0
 #define EMIT_ERROR -1
-
-typedef enum {
-  NONE,
-#ifdef COMPRESSION_GZIP
-  GZIP,
-#endif
-#ifdef COMPRESSION_BZIP2
-  BZIP2,
-#endif
-  DEFAULT_COMPRESSION
-} emit_compression_opt;
-
-typedef enum {
-#ifdef PKGFMT_V1
-    V1,
-#endif
-#ifdef PKGFMT_V2
-    V2,
-#endif
-    DEFAULT_VERSION
-} emit_version_opt;
 
 typedef struct {
   char *output_file;
   time_t pkg_mtime;
-  emit_compression_opt compression;
-  emit_version_opt version;
+  pkg_compression_t compression;
+  pkg_version_t version;
 } emit_opts;
 
 typedef struct {
@@ -69,11 +50,12 @@ typedef struct {
   tar_writer *emit_tw;
 } emit_pkg_streams;
 
+int emit_file( const char *, tar_file_info *, tar_writer * );
 void finish_pkg_content( emit_opts *, emit_pkg_streams * );
 void finish_pkg_streams( emit_opts *, emit_pkg_streams * );
 void free_emit_opts( emit_opts * );
-emit_compression_opt get_compression( emit_opts * );
-emit_version_opt get_version( emit_opts * );
+pkg_compression_t get_compression( emit_opts * );
+pkg_version_t get_version( emit_opts * );
 void guess_compression_and_version_from_filename( emit_opts * );
 int start_pkg_content( emit_opts *, emit_pkg_streams * );
 emit_pkg_streams * start_pkg_streams( emit_opts * );

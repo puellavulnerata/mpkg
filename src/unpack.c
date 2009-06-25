@@ -29,7 +29,7 @@ static pkg_handle * open_pkg_file_v1_bzip2( const char * );
 static pkg_handle * open_pkg_file_v1_gzip( const char * );
 # endif
 static pkg_handle * open_pkg_file_v1_none( const char * );
-static pkg_handle * open_pkg_file_v1_stream( read_stream * );
+static pkg_handle * open_pkg_file_v1_stream( read_stream *, pkg_compression_t );
 #endif
 
 #ifdef PKGFMT_V2
@@ -57,6 +57,8 @@ static pkg_handle_builder * alloc_pkg_handle_builder( void ) {
     if ( !get_check_md5() || b->cksums ) {
       b->p = malloc( sizeof( *(b->p) ) );
       if ( b->p ) {
+	b->p->compression = DEFAULT_COMPRESSION;
+	b->p->version = DEFAULT_VERSION;
 	b->p->descr = NULL;
 	b->p->descr_file = NULL;
 	b->p->unpacked_dir = get_temp_dir();
@@ -557,7 +559,7 @@ static pkg_handle * open_pkg_file_v1_bzip2( const char *filename ) {
   if ( filename ) {
     rs = open_read_stream_bzip2( filename );
     if ( rs ) {
-      p = open_pkg_file_v1_stream( rs );
+      p = open_pkg_file_v1_stream( rs, BZIP2 );
       close_read_stream( rs );
     }
   }
@@ -577,7 +579,7 @@ static pkg_handle * open_pkg_file_v1_gzip( const char *filename ) {
   if ( filename ) {
     rs = open_read_stream_gzip( filename );
     if ( rs ) {
-      p = open_pkg_file_v1_stream( rs );
+      p = open_pkg_file_v1_stream( rs, GZIP );
       close_read_stream( rs );
     }
   }
@@ -595,7 +597,7 @@ static pkg_handle * open_pkg_file_v1_none( const char *filename ) {
   if ( filename ) {
     rs = open_read_stream_none( filename );
     if ( rs ) {
-      p = open_pkg_file_v1_stream( rs );
+      p = open_pkg_file_v1_stream( rs, NONE );
       close_read_stream( rs );
     }
   }
@@ -603,7 +605,7 @@ static pkg_handle * open_pkg_file_v1_none( const char *filename ) {
   return p;
 }
 
-static pkg_handle * open_pkg_file_v1_stream( read_stream *rs ) {
+static pkg_handle * open_pkg_file_v1_stream( read_stream *rs, pkg_compression_t comp ) {
   pkg_handle *p;
   tar_reader *tr;
   read_stream *trs;
@@ -617,7 +619,8 @@ static pkg_handle * open_pkg_file_v1_stream( read_stream *rs ) {
     if ( tr ) {
       b = alloc_pkg_handle_builder();
       if ( b ) {
-	b->p->version = PKG_VER_1;
+	b->p->compression = comp;
+	b->p->version = V1;
 	error = 0;
 	while ( ( status = get_next_file( tr ) ) == TAR_SUCCESS ) {
 	  tinf = get_file_info( tr );
@@ -692,7 +695,7 @@ static pkg_handle * open_pkg_file_v2_stream( read_stream *rs ) {
     if ( tr ) {
       b = alloc_pkg_handle_builder();
       if ( b ) {
-	b->p->version = PKG_VER_2;
+	b->p->version = V2;
 	error = 0;
 	while ( ( status = get_next_file( tr ) ) == TAR_SUCCESS ) {
 	  tinf = get_file_info( tr );
@@ -710,7 +713,10 @@ static pkg_handle * open_pkg_file_v2_stream( read_stream *rs ) {
 	      else if ( strcmp( tinf->filename, "package-content.tar" ) == 0 ) {
 		if ( !got_content ) {
 		  status = handle_content_v2( b, trs );
-		  if ( status == 0 ) got_content = 1;
+		  if ( status == 0 ) {
+		    b->p->compression = NONE;
+		    got_content = 1;
+		  }
 		}
 		/* Duplicate package-content */
 		else status = -1;
@@ -721,14 +727,17 @@ static pkg_handle * open_pkg_file_v2_stream( read_stream *rs ) {
 		  decomped_trs = open_read_stream_from_stream_gzip( trs );
 		  if ( decomped_trs ) {
 		    status = handle_content_v2( b, decomped_trs );
-		    if ( status == 0 ) got_content = 1;
+		    if ( status == 0 ) {
+		      got_content = 1;
+		      b->p->compression = GZIP;
+		    }
 		    close_read_stream( decomped_trs );
 		    decomped_trs = NULL;
 		  }
 		}
 		/* Duplicate package-content */
 		else status = -1;
-	      }	      
+	      }
 #endif
 #ifdef COMPRESSION_BZIP2
 	      else if ( strcmp( tinf->filename, "package-content.tar.bz2" ) == 0 ) {
@@ -736,7 +745,10 @@ static pkg_handle * open_pkg_file_v2_stream( read_stream *rs ) {
 		  decomped_trs = open_read_stream_from_stream_bzip2( trs );
 		  if ( decomped_trs ) {
 		    status = handle_content_v2( b, decomped_trs );
-		    if ( status == 0 ) got_content = 1;
+		    if ( status == 0 ) {
+		      got_content = 1;
+		      b->p->compression = BZIP2;
+		    }
 		    close_read_stream( decomped_trs );
 		    decomped_trs = NULL;
 		  }

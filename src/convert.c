@@ -15,7 +15,9 @@ typedef struct {
 } convert_opts;
 
 static convert_opts * alloc_convert_opts( void );
-static int convert_pkg( const convert_opts * );
+static int convert_descr( pkg_handle *, emit_pkg_streams * );
+static int convert_files( pkg_handle *, emit_pkg_streams * );
+static int convert_pkg( convert_opts * );
 static void free_convert_opts( convert_opts * );
 static int set_compression_arg( convert_opts *, const char * );
 static int set_input_file( convert_opts *, const char * );
@@ -42,6 +44,95 @@ static convert_opts * alloc_convert_opts( void ) {
   }
 
   return opts;
+}
+
+static int convert_descr( pkg_handle *ipkg, emit_pkg_streams *opkg ) {
+  int status, result;
+  const char *descr_name = "package-description";
+  tar_file_info ti;
+
+  status = CONVERT_SUCCESS;
+  if ( ipkg && ipkg->descr && ipkg->descr_file && opkg && opkg->pkg_tw ) {
+    ti.type = TAR_FILE;
+    strncpy( ti.filename, descr_name,
+	     TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
+    strncpy( ti.target, "", TAR_TARGET_LEN + 1 );
+    ti.owner = 0;
+    ti.group = 0;
+    ti.mode = 0644;
+    ti.mtime = ipkg->descr->hdr.pkg_time;
+    result = emit_file( ipkg->descr_file, &ti, opkg->pkg_tw );
+    if ( result != EMIT_SUCCESS ) {
+      fprintf( stderr, "Couldn't emit %s to tarball\n", descr_name );
+      status = CONVERT_ERROR;
+    }
+  }
+  else status = CONVERT_ERROR;
+
+  return status;
+}
+
+static int convert_files( pkg_handle *ipkg, emit_pkg_streams *opkg ) {
+  int status, result, i;
+  pkg_descr_entry *e;
+  tar_file_info ti;
+  char *src_filename;
+  char *tar_filename;
+  char *temp;
+
+  status = CONVERT_SUCCESS;
+  if ( ipkg && ipkg->descr && opkg && opkg->emit_tw ) {
+    /* Initialize fixed fields of tar_file_info struct */
+    ti.type = TAR_FILE;
+    strncpy( ti.target, "", TAR_TARGET_LEN + 1 );
+    ti.owner = 0;
+    ti.group = 0;
+    ti.mode = 0644;
+    ti.mtime = ipkg->descr->hdr.pkg_time;
+
+    /* Iterate over the input package entries */
+    for ( i = 0; i < ipkg->descr->num_entries; ++i ) {
+      e = &(ipkg->descr->entries[i]);
+      if ( e->type == ENTRY_FILE ) {
+	src_filename = NULL;
+	temp = concatenate_paths( ipkg->unpacked_dir, "package-content" );
+	if ( temp ) {
+	  src_filename = concatenate_paths( temp, e->filename );
+	  free( temp );
+	  temp = NULL;
+	}
+
+	if ( src_filename ) {
+	  tar_filename = e->filename;
+
+	  /* Strip off leading slashes */
+	  while ( *tar_filename == '/' ) ++tar_filename;
+	  strncpy( ti.filename, tar_filename,
+		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
+
+	  /* Emit it */
+	  result = emit_file( src_filename, &ti, opkg->emit_tw );
+	  if ( result != EMIT_SUCCESS ) {
+	    fprintf( stderr, "Error emitting file %s\n", src_filename );
+	    status = CONVERT_ERROR;
+	  }
+
+	  free( src_filename );
+	}
+	else {
+	  fprintf( stderr, "Unable to allocate memory trying to emit %s\n",
+		   e->filename );
+	  status = CONVERT_ERROR;
+	}
+      }
+      /* else nothing to emit for non-files */
+
+      if ( status != CONVERT_SUCCESS ) break;
+    }
+  }
+  else status = CONVERT_ERROR;
+
+  return status;
 }
 
 void convert_main( int argc, char **argv ) {
@@ -133,6 +224,93 @@ void convert_main( int argc, char **argv ) {
     free_convert_opts( opts );
     opts = NULL;
   }
+}
+
+static int convert_pkg( convert_opts *opts ) {
+  int status, result;
+  pkg_handle *ipkg;
+  emit_pkg_streams *opkg;
+
+  status = CONVERT_SUCCESS;
+  if ( opts && opts->emit && opts->emit->output_file && opts->input_file) {
+    /*
+     * If the compression or version options were not set on the
+     * command line, try to guess based on the output filename.
+     */
+
+    guess_compression_and_version_from_filename( opts->emit );
+
+    /*
+     * We need to open the input file here, because if version or
+     * compression options for the output were not set on the command
+     * line or determined from the output filename, we fall back to
+     * matching the input.
+     */
+
+    ipkg = open_pkg_file( opts->input_file );
+    if ( ipkg ) {
+      /*
+       * If we still don't know what compression and vesion to use for
+       * output, match the input.
+       */
+
+      if ( opts->emit->compression == DEFAULT_COMPRESSION )
+	opts->emit->compression = ipkg->compression;
+
+      if ( opts->emit->version == DEFAULT_VERSION )
+	opts->emit->version = ipkg->version;
+
+      /*
+       * If all else fails, leave compression set to defaults, and
+       * emit.c will pick one.
+       */
+
+      opkg = start_pkg_streams( opts->emit );
+      if ( opkg ) {
+	result = convert_descr( ipkg, opkg );
+	if ( result != CONVERT_SUCCESS ) {
+	  fprintf( stderr, "Unable to emit package-description\n" );
+	  status = result;
+	}
+
+	if ( status == CONVERT_SUCCESS ) {
+	  result = start_pkg_content( opts->emit, opkg );
+	  if ( result == EMIT_SUCCESS ) {
+	    result = convert_files( ipkg, opkg );
+	    if ( result != CONVERT_SUCCESS ) {
+	      fprintf( stderr, "Unable to emit package contents\n" );
+	      status = result;
+	    }
+	    finish_pkg_content( opts->emit, opkg );
+	  }
+	  else {
+	    fprintf( stderr, "Unable to emit package contents\n" );
+	    status = CONVERT_ERROR;
+	  }
+	}
+
+	finish_pkg_streams( opts->emit, opkg );
+	/* Remove output if there was a problem */
+	if ( status != CONVERT_SUCCESS ) unlink( opts->emit->output_file );
+      }
+      else {
+	fprintf( stderr, "Unable to open output package %s for conversion\n",
+		 opts->emit->output_file );
+	status = CONVERT_ERROR;
+      }
+
+      /* Make sure we close the package handle */
+      close_pkg( ipkg );
+    }
+    else {
+      fprintf( stderr, "Unable to open input package %s for conversion\n",
+	       opts->input_file );
+      status = CONVERT_ERROR;
+    }
+  }
+  else status = CONVERT_ERROR;
+
+  return status;
 }
 
 static void free_convert_opts( convert_opts *opts ) {

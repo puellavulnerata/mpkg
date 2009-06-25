@@ -6,6 +6,48 @@
 
 #include <pkg.h>
 
+#define EMIT_BUF_LEN 1024
+
+int emit_file( const char *src, tar_file_info *ti, tar_writer *tw ) {
+  int status;
+  read_stream *rs;
+  write_stream *ws;
+  char buf[EMIT_BUF_LEN];
+  long len;
+
+  status = EMIT_SUCCESS;
+  if ( src && ti && tw ) {
+    rs = open_read_stream_none( src );
+    if ( rs ) {
+      ws = put_next_file( tw, ti );
+      if ( ws ) {
+        while ( ( len = read_from_stream( rs, buf, EMIT_BUF_LEN ) ) > 0 ) {
+          if ( write_to_stream( ws, buf, len ) != len ) {
+            fprintf( stderr, "Unable to write to tarball for %s\n", src );
+            status = EMIT_ERROR;
+            break;
+          }
+        }
+        close_write_stream( ws );
+      }
+      else {
+        fprintf( stderr,
+                 "Unable to open write stream to tarball for %s\n", src );
+        status = EMIT_ERROR;
+      }
+      close_read_stream( rs );
+    }
+    else {
+      fprintf( stderr, "Unable to read from file %s\n", src );
+      status = EMIT_ERROR;
+    }
+  }
+  else status = EMIT_ERROR;
+
+  return status;
+}
+
+
 void finish_pkg_content( emit_opts *opts, emit_pkg_streams *streams ) {
   if ( opts && streams ) {
     switch ( get_version( opts ) ) {
@@ -126,8 +168,8 @@ void free_emit_opts( emit_opts *opts ) {
   }
 }
 
-emit_compression_opt get_compression( emit_opts *opts ) {
-  emit_compression_opt result;
+pkg_compression_t get_compression( emit_opts *opts ) {
+  pkg_compression_t result;
 
 #ifdef COMPRESSION_BZIP2
   /* Default to bzip2 if available */
@@ -148,8 +190,8 @@ emit_compression_opt get_compression( emit_opts *opts ) {
   return result;
 }
 
-emit_version_opt get_version( emit_opts *opts ) {
-  emit_version_opt result;
+pkg_version_t get_version( emit_opts *opts ) {
+  pkg_version_t result;
 
 #ifdef PKGFMT_V1
 # ifdef PKGFMT_V2
