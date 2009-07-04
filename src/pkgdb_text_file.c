@@ -1,5 +1,11 @@
 #include <stdlib.h>
 
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <pkg.h>
 
 typedef struct {
@@ -13,6 +19,7 @@ static int delete_from_text_file( void *, char * );
 static unsigned long entry_count_text_file( void * );
 static int enumerate_text_file( void *, void *, char **, char **, void ** );
 static int insert_into_text_file( void *, char *, char * );
+static int make_backup( text_file_data * );
 static int parse_line( char *, rbtree *, int );
 static int parse_text_file( FILE *, rbtree * );
 static char * query_text_file( void *, char * );
@@ -30,40 +37,52 @@ static int close_text_file( void *tfd_v ) {
   if ( tfd_v ) {
     tfd = (text_file_data *)tfd_v;
     if ( tfd->dirty ) {
-      fp = fopen( tfd->filename, "w" );
-      if ( fp ) {
-	n = NULL;
-	lnum = 0;
-	while ( key_v = rbtree_enum( tfd->data, n, &val_v, &n ) ) {
-	  ++lnum;
-	  if ( key_v && val_v ) {
-	    key = (char *)key_v;
-	    val = (char *)val_v;
-	    if ( strlen( key ) > 0 && strlen( val ) > 0 ) {
-	      result = fprintf( fp, "%s %s\n", key, val );
-	      if ( result < 0 ) {
+      result = make_backup( tfd );
+      result = 0;
+      if ( result == 0 ) {
+	fp = fopen( tfd->filename, "w" );
+	if ( fp ) {
+	  n = NULL;
+	  lnum = 0;
+	  while ( key_v = rbtree_enum( tfd->data, n, &val_v, &n ) ) {
+	    ++lnum;
+	    if ( key_v && val_v ) {
+	      key = (char *)key_v;
+	      val = (char *)val_v;
+	      if ( strlen( key ) > 0 && strlen( val ) > 0 ) {
+		result = fprintf( fp, "%s %s\n", key, val );
+		if ( result < 0 ) {
+		  fprintf( stderr, "pkgdb_text_file line %d: ", lnum );
+		  fprintf( stderr, "error %d while writing\n", result );
+		  status = -1;
+		}
+	      }
+	      else {
 		fprintf( stderr, "pkgdb_text_file line %d: ", lnum );
-		fprintf( stderr, "error %d while writing\n", result );
+		fprintf( stderr,
+			 "empty line from the rbtree while writing.\n" );
 		status = -1;
 	      }
 	    }
 	    else {
 	      fprintf( stderr, "pkgdb_text_file line %d: ", lnum );
-	      fprintf( stderr, "empty line from the rbtree while writing.\n" );
+	      fprintf( stderr,
+		       "got a NULL out of the rbtree while writing.\n" );
 	      status = -1;
 	    }
 	  }
-	  else {
-	    fprintf( stderr, "pkgdb_text_file line %d: ", lnum );
-	    fprintf( stderr, "got a NULL out of the rbtree while writing.\n" );
-	    status = -1;
-	  }
+	  fclose( fp );
 	}
-	fclose( fp );
+	else {
+	  fprintf( stderr, "pkgdb_text_file: " );
+	  fprintf( stderr, "couldn't open output file %s to flush.\n",
+		   tfd->filename );
+	  status = -1;
+	}
       }
       else {
 	fprintf( stderr, "pkgdb_text_file: " );
-	fprintf( stderr, "couldn't open output file %s to flush.\n",
+	fprintf( stderr, "couldn't make backup of file %s.\n",
 		 tfd->filename );
 	status = -1;
       }
@@ -219,6 +238,90 @@ static int insert_into_text_file( void *tfd_v, char *key, char *data ) {
     else status = -1;
   }
   else status = -1;
+  return status;
+}
+
+#define BK_BUFSIZ 1024
+
+static int make_backup( text_file_data *tfd ) {
+  int status, result, bk_file_len;
+  char *bk_file;
+  int srcfd, dstfd;
+  struct stat st;
+  char buf[BK_BUFSIZ];
+  int count, written, wcount;
+
+  status = 0;
+  if ( tfd && tfd->filename ) {
+    bk_file_len = strlen( tfd->filename ) + 5;
+    bk_file = malloc( bk_file_len * sizeof( *bk_file ) );
+    if ( bk_file ) {
+      snprintf( bk_file, bk_file_len, "%s.bak\n", tfd->filename );
+
+      /* Try to stat the backup file, and remove any old backup */
+      result = lstat( bk_file, &st );
+      if ( result == 0 ) {
+	/* It exists */
+	if ( S_ISREG(st.st_mode) || S_ISLNK(st.st_mode) ) {
+	  /* Try to remove it */
+	  result = unlink( bk_file );
+	  if ( result != 0 ) status = -1;
+	}
+	/* else error */
+	else status = -1;
+      }
+      else {
+	/* If we had ENOENT, we're okay, otherwise error */
+	if ( errno != ENOENT ) status = -1;
+      }
+
+      if ( status == 0 ) {
+	/* We've cleared the backup file */
+	dstfd = open( bk_file, O_RDWR | O_CREAT | O_EXCL, 0644 );
+	if ( dstfd != -1 ) {
+	  srcfd = open( tfd->filename, O_RDONLY );
+	  if ( srcfd != -1 ) {
+	    while ( ( count = read( srcfd, buf, BK_BUFSIZ ) ) > 0 ) {
+	      written = 0;
+	      while ( written < count &&
+		      ( wcount = write( dstfd, buf + written,
+					count - written ) ) >= 0 ) {
+		written += wcount;
+	      }
+
+	      if ( wcount < 0 ) {
+		/* Error writing */
+		status = -1;
+		/* Break out of read loop */
+		break;
+	      }
+	    }
+
+	    if ( count < 0 ) {
+	      /* Error reading; 0 means EOF */
+	      status = -1;
+	    }
+
+	    close( srcfd );
+	  }
+	  else status = -1;
+
+	  close( dstfd );
+
+	  if ( status != 0 ) {
+	    /* If error, remove malformed file */
+	    unlink( bk_file );
+	  }
+	}
+	else status = -1;
+      }
+
+      free( bk_file );
+    }
+    else status = -1;
+  }
+  else status = -1;
+
   return status;
 }
 
