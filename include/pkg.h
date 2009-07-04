@@ -2,6 +2,7 @@
 #define __PKG_H__
 
 #include <convert.h>
+#include <convertdb.h>
 #include <create.h>
 #include <createdb.h>
 #include <emit.h>
