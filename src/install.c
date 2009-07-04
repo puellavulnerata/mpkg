@@ -1341,61 +1341,78 @@ static int do_preinst_one_dir( install_state *is,
 	  if ( lastcomp ) {
 	    record_dir = 0;
 
-	    result = lstat( lastcomp, &st );
-	    if ( result == 0 ) {
-	      /* It already exists */
-	      if ( S_ISDIR( st.st_mode ) ) {
-		/*
-		 * It's a directory, so we're finished here.  Just claim
-		 * it.
-		 */
+	    /* If p isn't '/' */
+	    if ( strlen( lastcomp ) > 0 ) {
+	      result = lstat( lastcomp, &st );
+	      if ( result == 0 ) {
+		/* It already exists */
+		if ( S_ISDIR( st.st_mode ) ) {
+		  /*
+		   * It's a directory, so we're finished here.  Just claim
+		   * it.
+		   */
 
-		record_dir = 1;
-		dd.owner = owner;
-		dd.group = group;
-		dd.mode = e->u.d.mode;
-		dd.mtime = pkg->descr->hdr.pkg_time;
-		dd.unroll = 0;
-		dd.claim = 1;
-	      }
-	      else {
-		/* It's not a directory.  This is an error. */
-
-		fprintf( stderr, "%s%s: already exists but not a directory\n",
-			 get_root(), p );
-		status = INSTALL_ERROR;
-	      }
-	    }
-	    else {
-	      if ( errno == ENOENT ) {
-		/* It doesn't exist, we create it. */
-
-		result = mkdir( lastcomp, 0700 );
-		if ( result == 0 ) {
 		  record_dir = 1;
 		  dd.owner = owner;
 		  dd.group = group;
 		  dd.mode = e->u.d.mode;
-		  dd.unroll = 1;
+		  dd.mtime = pkg->descr->hdr.pkg_time;
+		  dd.unroll = 0;
 		  dd.claim = 1;
 		}
 		else {
-		  /* Error in mkdir() */
+		  /* It's not a directory.  This is an error. */
+		  
 		  fprintf( stderr,
-			   "%s%s: couldn't mkdir(): %s\n",
-			   get_root(), p, strerror( errno ) );
-
-		  if ( errno == ENOSPC ) status = INSTALL_OUT_OF_DISK;
-		  else status = INSTALL_ERROR;
+			   "%s%s: already exists but not a directory\n",
+			   get_root(), p );
+		  status = INSTALL_ERROR;
 		}
 	      }
 	      else {
-		/* Some other error in lstat() */
+		if ( errno == ENOENT ) {
+		  /* It doesn't exist, we create it. */
+		  
+		  result = mkdir( lastcomp, 0700 );
+		  if ( result == 0 ) {
+		    record_dir = 1;
+		    dd.owner = owner;
+		    dd.group = group;
+		    dd.mode = e->u.d.mode;
+		    dd.unroll = 1;
+		    dd.claim = 1;
+		  }
+		  else {
+		    /* Error in mkdir() */
+		    fprintf( stderr,
+			     "%s%s: couldn't mkdir(): %s\n",
+			     get_root(), p, strerror( errno ) );
 
-		fprintf( stderr, "%s%s: couldn't lstat(): %s\n",
-			 get_root(), p, strerror( errno ) );
-		status = INSTALL_ERROR;
+		    if ( errno == ENOSPC ) status = INSTALL_OUT_OF_DISK;
+		    else status = INSTALL_ERROR;
+		  }
+		}
+		else {
+		  /* Some other error in lstat() */
+
+		  fprintf( stderr, "%s%s: couldn't lstat(): %s\n",
+			   get_root(), p, strerror( errno ) );
+		  status = INSTALL_ERROR;
+		}
 	      }
+	    }
+	    else {
+	      /*
+	       * p was /, we record and claim it, but we don't create
+	       * or unroll it.
+	       */
+
+	      record_dir = 1;
+	      dd.owner = owner;
+	      dd.group = group;
+	      dd.mode = e->u.d.mode;
+	      dd.unroll = 0;
+	      dd.claim = 1;
 	    }
 
 	    /* Now we just record it if necessary */
@@ -2511,6 +2528,7 @@ static int install_pkg( pkg_db *db, pkg_handle *p ) {
       status = handle_replace( db, p, is );
       if ( status != INSTALL_SUCCESS ) goto install_done;
 
+      /* Pass nine */
       status = adjust_dir_mtimes( db, p, is );
 
       goto install_done;

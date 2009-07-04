@@ -77,12 +77,20 @@ char * canonicalize_and_copy( const char *path ) {
 	    }
 	  }
 
-	  parts_tmp = realloc( part_idx, sizeof( *part_idx ) * parts );
-	  if ( parts_tmp ) {
+	  if ( parts > 0 ) {
+	    parts_tmp = realloc( part_idx, sizeof( *part_idx ) * parts );
+	  }
+	  else parts_tmp = 0;
+
+	  if ( parts_tmp || parts == 0 ) {
 	    part_idx = parts_tmp;
 
-	    parts_to_copy = malloc( sizeof( *parts_to_copy ) * parts );
-	    if ( parts_to_copy ) {
+	    if ( parts > 0 ) {
+	      parts_to_copy = malloc( sizeof( *parts_to_copy ) * parts );
+	    }
+	    else parts_to_copy = NULL;
+
+	    if ( parts_to_copy || parts == 0 ) {
 	      /*
 	       * We already know whether the path is absolute or
 	       * relative.  Since .. can always cancel against its
@@ -116,9 +124,13 @@ char * canonicalize_and_copy( const char *path ) {
 	        ++n;
 	      }
 
-	      parts_tmp = realloc( parts_to_copy,
-				   sizeof( *parts_to_copy ) * n );
-	      if ( parts_tmp ) {
+	      if ( n > 0 ) {
+		parts_tmp = realloc( parts_to_copy,
+				     sizeof( *parts_to_copy ) * n );
+	      }
+	      else parts_tmp = NULL;
+
+	      if ( parts_tmp || n == 0 ) {
 		parts_to_copy = parts_tmp;
 
 		i = 0;
@@ -151,7 +163,7 @@ char * canonicalize_and_copy( const char *path ) {
 		tmp = NULL;
 	      }
 
-	      free( parts_to_copy );
+	      if ( parts_to_copy ) free( parts_to_copy );
 	    }
 	    else {
 	      free( tmp );
@@ -159,7 +171,7 @@ char * canonicalize_and_copy( const char *path ) {
 	    }
 	  }
 
-	  free( part_idx );
+	  if ( part_idx ) free( part_idx );
 	  return tmp;
 	}
 	else {
