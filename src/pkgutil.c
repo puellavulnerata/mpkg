@@ -15,6 +15,110 @@
 static char hex_digit_to_char( unsigned char );
 
 /*
+ * int copy_file( const char *dest, const char *src );
+ *
+ * Copy a file.  Return LINK_OR_COPY error codes.
+ */
+
+#define COPY_BUF_SIZE 1024
+
+int copy_file( const char *dest, const char *src ) {
+  int result, status, srcfd, dstfd;
+  long count, written, wcount;
+  struct stat st;
+  mode_t dst_mode;
+  char buf[COPY_BUF_SIZE];
+
+  status = LINK_OR_COPY_SUCCESS;
+  if ( dest && src ) {
+    result = lstat( dest, &st );
+    if ( result == 0 ) {
+      /* Something exists, try to unlink it. */
+
+      result = unlink( dest );
+      if ( result != 0 ) status = LINK_OR_COPY_ERROR;
+    }
+    else if ( errno != ENOENT ) status = LINK_OR_COPY_ERROR;
+
+    if ( status == LINK_OR_COPY_SUCCESS ) {
+      srcfd = open( src, O_RDONLY );
+      if ( srcfd != -1 ) {
+	/* Stat it to get the source mode */
+	result = fstat( srcfd, &st );
+	if ( result == 0 ) dst_mode = st.st_mode;
+	else dst_mode = 0600;
+
+	/* The destination name should be clear now, try to copy it */
+	dstfd = open( dest, O_RDWR | O_CREAT | O_EXCL, 0600 );
+	if ( dstfd != -1 ) {
+	  while ( ( count = read( srcfd, buf, COPY_BUF_SIZE ) ) > 0 ) {
+	    written = 0;
+	    while ( written < count &&
+		    ( wcount = write( dstfd, buf + written,
+				      count - written ) ) >= 0 ) {
+	      written += wcount;
+	    }
+
+	    if ( wcount < 0 ) {
+	      /* Error writing */
+	      fprintf( stderr,
+		       "copy_file(): write error during copy: %s\n",
+		       strerror( errno ) );
+	      
+	      if ( errno == ENOSPC ) status = LINK_OR_COPY_OUT_OF_DISK;
+	      else status = LINK_OR_COPY_ERROR;
+	      /* Break out of read loop */
+	      break;
+	    }
+	  }
+
+	  /*
+	   * We fell out of the loop, so count <= 0.  count == 0 means
+	   * EOF, count < 0 means error.  Check status in case we set
+	   * it on a write error and broke out of the loop.
+	   */
+
+	  if ( status == LINK_OR_COPY_SUCCESS && count < 0 ) {
+	    fprintf( stderr,
+		     "copy_file(): read error during copy: %s\n",
+		     strerror( errno ) );
+	    status = LINK_OR_COPY_ERROR;
+	  }
+	  
+	  close( dstfd );
+
+	  /* Adjust the mode */
+	  chmod( dest, dst_mode );
+	}
+	else {
+	  /* Couldn't open dest for copy */
+	  
+	  fprintf( stderr,
+		   "copy_file(): couldn't open dest %s for copy: %s\n",
+		   dest, strerror( errno ) );
+	    
+	  if ( errno == ENOSPC ) status = LINK_OR_COPY_OUT_OF_DISK;
+	  else status = LINK_OR_COPY_ERROR;
+	}
+	
+	close( srcfd );
+      }
+      else {
+	/* Couldn't open source for copy */
+	    
+	fprintf( stderr,
+		 "copy_file(): couldn't open src %s for copy: %s\n",
+		 src, strerror( errno ) );   
+	status = LINK_OR_COPY_ERROR;
+      }
+    }
+  }
+  else status = LINK_OR_COPY_ERROR;
+
+  return status;
+}
+
+/*
  * char * copy_string( const char *s );
  *
  * Copy a string into a newly-allocated block of memory.
@@ -855,4 +959,41 @@ int strlistlen( char **list ) {
     return len;
   }
   else return -1;
+}
+
+/*
+ * int unlink_if_needed( const char *filename );
+ *
+ * Remove an existing file or symlink at a given filename, if one
+ * exists, and return 1 if the filename is now clear.  Returns 0 if it
+ * is unable to remove an existing object at that filename.
+ */
+
+int unlink_if_needed( const char *filename ) {
+  int status, result;
+  struct stat st;
+
+  status = 0;
+  if ( filename ) {
+    result = lstat( filename, &st );
+    if ( result == 0 ) {
+      if ( S_ISREG( st.st_mode ) || S_ISLNK( st.st_mode ) ) {
+	result = unlink( filename );
+	if ( result == 0 ) {
+	  /* Unlink succeeded */
+	  status = 1;
+	}
+      }
+      /* else can't remove directory or other type */
+    }
+    else {
+      /* lstat() failed; why? */
+      if ( errno == ENOENT ) {
+	/* The path is already clear */
+	status = 1;
+      }
+    }
+  }
+
+  return status;
 }

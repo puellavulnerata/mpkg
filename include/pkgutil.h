@@ -14,6 +14,7 @@
 #define READ_SYMLINK_NOT_SYMLINK -4
 #define READ_SYMLINK_ERROR -5
 
+int copy_file( const char *, const char * );
 char * copy_string( const char * );
 void dbg_printf( char const *, int, char const *, ... );
 char * get_current_dir( void );
@@ -30,5 +31,6 @@ int read_symlink_target( const char *, char ** );
 int recrm( const char * );
 char * rename_to_temp( const char * );
 int strlistlen( char ** );
+int unlink_if_needed( const char * );
 
-#endif
+#endif /* __PKGUTIL_H__ */

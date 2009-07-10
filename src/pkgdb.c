@@ -9,6 +9,10 @@ int close_pkg_db( pkg_db *db ) {
   if ( db ) {
     result = db->close( db->private );
     if ( result != 0 ) status = result;
+    if ( db->filename ) {
+      free( db->filename );
+      db->filename = NULL;
+    }
     free( db );
   }
   else status = -1;

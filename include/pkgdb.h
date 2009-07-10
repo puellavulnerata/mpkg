@@ -6,6 +6,14 @@
 #define PKGDB_BDB_FILE_NAME "pkg-managed-files.bdb"
 #endif /* DB_BDB */
 
+typedef enum {
+  DBFMT_TEXT,
+#ifdef DB_BDB
+  DBFMT_BDB,
+#endif /* DB_BDB */
+  DBFMT_UNKNOWN
+} dbfmt_t;
+
 typedef struct {
   void *private;
   char * (*query)( void *, char * );
@@ -14,6 +22,8 @@ typedef struct {
   unsigned long (*entry_count)( void * );
   int (*enumerate)( void *, void *, char **, char **, void ** );
   int (*close)( void * );
+  dbfmt_t format;
+  char *filename;
 } pkg_db;
 
 int close_pkg_db( pkg_db * );

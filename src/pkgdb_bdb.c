@@ -28,21 +28,29 @@ pkg_db * create_pkg_db_bdb( char *filename ) {
   ret->close = close_bdb;
   ret->enumerate = enumerate_bdb;
   ret->entry_count = entry_count_bdb;
+  ret->format = DBFMT_BDB;
+  ret->filename = copy_string( filename );
+  if ( !(ret->filename) ) {
+    free( ret );
+    return NULL;
+  }
 
   if( ( result = db_create( &bdb, NULL, 0 ) ) != 0 )
   {
     /* Might want to use DB->err, but it's simpler to fprintf. */
     fprintf( stderr, "bdb db_create failed (%d)\n", result );
+    free( ret->filename );
     free( ret );
     return NULL;
   }
   ret->private = (void *)bdb;
 
   if( ( result = bdb->open( bdb, NULL, filename, 
-    NULL, DB_BTREE, DB_CREATE | DB_EXCL, 0 ) ) != 0 )
+    NULL, DB_BTREE, DB_CREATE | DB_EXCL, 0644 ) ) != 0 )
   {
     fprintf( stderr, "bdb database create failed (%d)\n", result );
     bdb->close( bdb, 0 );
+    free( ret->filename );
     free( ret );
     return NULL;
   }
@@ -64,11 +72,18 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
   ret->close = close_bdb;
   ret->enumerate = enumerate_bdb;
   ret->entry_count = entry_count_bdb;
+  ret->format = DBFMT_BDB;
+  ret->filename = copy_string( filename );
+  if ( !(ret->filename) ) {
+    free( ret );
+    return NULL;
+  }
 
   if( ( result = db_create( &bdb, NULL, 0 ) ) != 0 )
   {
     /* Might want to use DB->err, but it's simpler to fprintf.*/
     /* fprintf( stderr, "bdb db_create failed (%d)\n", result ); */
+    free( ret->filename );
     free( ret );
     return NULL;
   }
@@ -79,6 +94,7 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
   {
     /* fprintf( stderr, "bdb database open failed\n" ); */
     bdb->close( bdb, 0 );
+    free( ret->filename );
     free( ret );
     return NULL;
   }

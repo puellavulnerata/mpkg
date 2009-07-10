@@ -11,7 +11,7 @@
 typedef struct {
   char *filename;
   rbtree *data;
-  int dirty;
+  int dirty, created;
 } text_file_data;
 
 static int close_text_file( void * );
@@ -37,8 +37,9 @@ static int close_text_file( void *tfd_v ) {
   if ( tfd_v ) {
     tfd = (text_file_data *)tfd_v;
     if ( tfd->dirty ) {
-      result = make_backup( tfd );
-      result = 0;
+      if ( !(tfd->created) ) result = make_backup( tfd );
+      else result = 0;
+
       if ( result == 0 ) {
 	fp = fopen( tfd->filename, "w" );
 	if ( fp ) {
@@ -109,34 +110,47 @@ pkg_db * create_pkg_db_text_file( char *filename ) {
       temp->close = close_text_file;
       temp->entry_count = entry_count_text_file;
       temp->enumerate = enumerate_text_file;
-      tfd = malloc( sizeof( *tfd ) );
-      if ( tfd ) {
-	temp->private = (void *)tfd;
-	tfd->filename = copy_string( filename );
-	tfd->data = rbtree_alloc( rbtree_string_comparator,
-				  rbtree_string_copier,
-				  rbtree_string_free,
-				  rbtree_string_copier,
-				  rbtree_string_free );
-	tfd->dirty = 0;
-	if ( tfd->filename && tfd->data ) {
-	  fp = fopen( tfd->filename, "w" );
-	  if ( fp ) {
-	    fclose( fp );
-	    return temp;
+      temp->format = DBFMT_TEXT;
+      temp->filename = copy_string( filename );
+
+      if ( temp->filename ) {
+	tfd = malloc( sizeof( *tfd ) );
+	if ( tfd ) {
+	  temp->private = (void *)tfd;
+	  tfd->filename = copy_string( filename );
+	  tfd->data = rbtree_alloc( rbtree_string_comparator,
+				    rbtree_string_copier,
+				    rbtree_string_free,
+				    rbtree_string_copier,
+				    rbtree_string_free );
+	  tfd->dirty = 0;
+	  tfd->created = 1;
+	  if ( tfd->filename && tfd->data ) {
+	    fp = fopen( tfd->filename, "w" );
+	    if ( fp ) {
+	      fclose( fp );
+	      return temp;
+	    }
+	    else {
+	      free( tfd->filename );
+	      rbtree_free( tfd->data );
+	      free( tfd );
+	      free( temp->filename );
+	      free( temp );
+	      return NULL;
+	    }
 	  }
 	  else {
-	    free( tfd->filename );
-	    rbtree_free( tfd->data );
+	    if ( tfd->filename ) free( tfd->filename );
+	    if ( tfd->data ) rbtree_free( tfd->data );
 	    free( tfd );
+	    free( temp->filename );
 	    free( temp );
 	    return NULL;
 	  }
 	}
 	else {
-	  if ( tfd->filename ) free( tfd->filename );
-	  if ( tfd->data ) rbtree_free( tfd->data );
-	  free( tfd );
+	  free( temp->filename );
 	  free( temp );
 	  return NULL;
 	}
@@ -256,7 +270,7 @@ static int make_backup( text_file_data *tfd ) {
     bk_file_len = strlen( tfd->filename ) + 5;
     bk_file = malloc( bk_file_len * sizeof( *bk_file ) );
     if ( bk_file ) {
-      snprintf( bk_file, bk_file_len, "%s.bak\n", tfd->filename );
+      snprintf( bk_file, bk_file_len, "%s.bak", tfd->filename );
 
       /* Try to stat the backup file, and remove any old backup */
       result = lstat( bk_file, &st );
@@ -277,43 +291,11 @@ static int make_backup( text_file_data *tfd ) {
 
       if ( status == 0 ) {
 	/* We've cleared the backup file */
-	dstfd = open( bk_file, O_RDWR | O_CREAT | O_EXCL, 0644 );
-	if ( dstfd != -1 ) {
-	  srcfd = open( tfd->filename, O_RDONLY );
-	  if ( srcfd != -1 ) {
-	    while ( ( count = read( srcfd, buf, BK_BUFSIZ ) ) > 0 ) {
-	      written = 0;
-	      while ( written < count &&
-		      ( wcount = write( dstfd, buf + written,
-					count - written ) ) >= 0 ) {
-		written += wcount;
-	      }
-
-	      if ( wcount < 0 ) {
-		/* Error writing */
-		status = -1;
-		/* Break out of read loop */
-		break;
-	      }
-	    }
-
-	    if ( count < 0 ) {
-	      /* Error reading; 0 means EOF */
-	      status = -1;
-	    }
-
-	    close( srcfd );
-	  }
-	  else status = -1;
-
-	  close( dstfd );
-
-	  if ( status != 0 ) {
-	    /* If error, remove malformed file */
-	    unlink( bk_file );
-	  }
+	result = copy_file( bk_file, tfd->filename );
+	if ( result != LINK_OR_COPY_SUCCESS ) {
+	  unlink( bk_file );
+	  status = -1;
 	}
-	else status = -1;
       }
 
       free( bk_file );
@@ -337,8 +319,18 @@ pkg_db * open_pkg_db_text_file( char *filename ) {
       temp->close = close_text_file;
       temp->entry_count = entry_count_text_file;
       temp->enumerate = enumerate_text_file;
-      temp->private = read_text_file( filename );
-      if ( temp->private ) return temp;
+      temp->format = DBFMT_TEXT;
+      temp->filename = copy_string( filename );
+
+      if ( temp->filename ) {
+	temp->private = read_text_file( filename );
+	if ( temp->private ) return temp;
+	else {
+	  free( temp->filename );
+	  free( temp );
+	  return NULL;
+	}
+      }
       else {
 	free( temp );
 	return NULL;
@@ -431,6 +423,7 @@ static text_file_data * read_text_file( char *filename ) {
       tfd = malloc( sizeof( *tfd ) );
       if ( tfd ) {
 	tfd->dirty = 0;
+	tfd->created = 0;
 	tfd->filename = copy_string( filename );
 	if ( tfd->filename ) {
 	  tfd->data = rbtree_alloc( rbtree_string_comparator,
