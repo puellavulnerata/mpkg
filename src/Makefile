@@ -4,9 +4,10 @@ INCLUDE_FLAGS=-I../include
 LIBS=
 
 OBJS=\
-	convert.o convertdb.o create.o createdb.o emit.o install.o md5.o \
-	pkg.o pkgdb.o pkgdb_text_file.o pkgdescr.o pkgglobal.o pkgpath.o \
-	pkgutil.o rbtree.o remove.o streams_none.o streams.o tar.o unpack.o
+	convert.o convertdb.o create.o createdb.o dumpdb.o emit.o install.o \
+	md5.o pkg.o pkgdb.o pkgdb_text_file.o pkgdescr.o pkgglobal.o \
+	pkgpath.o pkgutil.o rbtree.o remove.o streams_none.o streams.o tar.o \
+	unpack.o
 
 ifdef CONFIG_BDB
 	OBJS+=pkgdb_bdb.o

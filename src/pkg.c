@@ -19,6 +19,7 @@ struct cmd_s {
   { "convertdb", convertdb_main },
   { "create", create_main },
   { "createdb", createdb_main },
+  { "dumpdb", dumpdb_main },
   { "help", help_callback },
   { "install", install_main },
   { "remove", remove_main },
