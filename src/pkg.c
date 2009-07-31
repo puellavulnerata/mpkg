@@ -23,6 +23,7 @@ struct cmd_s {
   { "help", help_callback },
   { "install", install_main },
   { "remove", remove_main },
+  { "repairdb", repairdb_main },
   { NULL, NULL }
 };
 

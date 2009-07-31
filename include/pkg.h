@@ -17,6 +17,7 @@
 #include <pkgutil.h>
 #include <rbtree.h>
 #include <remove.h>
+#include <repairdb.h>
 #include <streams.h>
 #include <tar.h>
 #include <unpack.h>
