@@ -77,5 +77,6 @@ void free_claims_list( claims_list_t * );
 claims_list_t * get_claims_list_by_location( claims_list_map_t *, char * );
 void repairdb_main( int, char ** );
 claims_list_map_t * repairdb_pass_one( void );
+rbtree * repairdb_pass_two( claims_list_map_t *, char );
 
 #endif /* __REPAIRDB_H__ */

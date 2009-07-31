@@ -5,8 +5,8 @@
 #include <pkg.h>
 
 static int make_repairdb_backup( pkg_db * );
-static int perform_repair( pkg_db * );
-static void repairdb( void );
+static int perform_repair( pkg_db *, char );
+static void repairdb( char );
 
 static int make_repairdb_backup( pkg_db *db ) {
   int status, result;
@@ -47,9 +47,10 @@ static int make_repairdb_backup( pkg_db *db ) {
   return status;
 }
 
-static int perform_repair( pkg_db *db ) {
+static int perform_repair( pkg_db *db, char content_checking ) {
   int status;
   claims_list_map_t *m;
+  rbtree *t;
 
   status = REPAIRDB_SUCCESS;
   if ( db ) {
@@ -80,6 +81,24 @@ static int perform_repair( pkg_db *db ) {
      * claims_list_t *, containing lists of all claims pertaining to
      * that location.  Pass one is independent of the actual database
      * contents.
+     *
+     * Pass two: resolve claims
+     *
+     * There are two versions of pass two, specified on the repairdb
+     * command line.  In either case, pass two iterates over the
+     * claims_list_map_t produced in pass one, and for each set of
+     * claims, selects exactly one or rejects all of them, and it
+     * returns a new rbtree which has locations as keys and package
+     * names selected as values.  The difference between the two modes
+     * is whether to check the filesystem contents.  Without content
+     * checking, claims are resolved based on the mtimes of the
+     * package-description files, in favor of the most recently
+     * installed package, without reference to the filesystem.  With
+     * content checking, claims are compared against either mtimes of
+     * installed files, or, if --enable-md5 is also used (or MD5
+     * checking is enabled as a compiled-in default), the MD5s.  The
+     * latter case in particular is potentially quite expensive, but
+     * is the most accurate method.
      */
 
     /* Perform pass one, and get a claims_list_map_t out */
@@ -89,7 +108,20 @@ static int perform_repair( pkg_db *db ) {
       printf( "Pass one complete;" );
       printf( " discovered %d claims to %d locations by %d packages\n",
 	      m->num_claims, m->num_locations, m->num_packages );
+
+      t = repairdb_pass_two( m, content_checking );
+
       free_claims_list_map( m );
+
+      if ( t ) {
+	printf( "Pass two complete; upheld claims on %lu locations\n",
+		t->count );
+
+	rbtree_free( t );
+      }
+      else {
+	fprintf( stderr, "Unable to complete pass two of repairdb\n" );
+      }
     }
     else {
       fprintf( stderr, "Unable to complete pass one of repairdb\n" );
@@ -102,8 +134,27 @@ static int perform_repair( pkg_db *db ) {
 }
 
 void repairdb_main( int argc, char **argv ) {
-  if ( argc == 0 ) {
-    repairdb();
+  char content_checking, error;
+
+  if ( argc == 0 || argc == 1 ) {
+    error = 0;
+
+    if ( argc == 1 ) {
+      if ( strcmp( argv[0], "--enable-content-checking" ) == 0 )
+	content_checking = 1;
+      else if ( strcmp( argv[0], "--disable-content-checking" ) == 0 )
+	content_checking = 0;
+      else {
+	fprintf( stderr, "Unknown parameter %s passed to repairdb\n",
+		 argv[0] );
+	fprintf( stderr, "Valid parameters are --enable-content-checking " );
+	fprintf( stderr, "and --disable-content-checking.\n" );
+	error = 1;
+      }
+    }
+    else content_checking = 0;
+
+    if ( !error ) repairdb( content_checking );
   }
   else {
     fprintf( stderr, "Wrong number of arguments to repairdb (%d)\n",
@@ -111,7 +162,7 @@ void repairdb_main( int argc, char **argv ) {
   }
 }
 
-static void repairdb( void ) {
+static void repairdb( char content_checking ) {
   pkg_db *db;
   int status, result;
 
@@ -141,7 +192,7 @@ static void repairdb( void ) {
     }
 
     if ( status == REPAIRDB_SUCCESS ) {
-      result = perform_repair( db );
+      result = perform_repair( db, content_checking );
       if ( result != REPAIRDB_SUCCESS ) {
 	fprintf( stderr, "Failed to repair database\n" );
 	status = result;
