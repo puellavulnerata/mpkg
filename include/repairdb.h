@@ -1,6 +1,11 @@
 #ifndef __REPAIRDB_H__
 #define __REPAIRDB_H__
 
+#include <md5.h>
+#include <pkgdb.h>
+#include <pkgdescr.h>
+#include <rbtree.h>
+
 #include <sys/types.h>
 #include <time.h>
 
@@ -78,5 +83,6 @@ claims_list_t * get_claims_list_by_location( claims_list_map_t *, char * );
 void repairdb_main( int, char ** );
 claims_list_map_t * repairdb_pass_one( void );
 rbtree * repairdb_pass_two( claims_list_map_t *, char );
+int repairdb_pass_three( pkg_db *, rbtree * );
 
 #endif /* __REPAIRDB_H__ */

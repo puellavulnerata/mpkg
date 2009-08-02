@@ -48,7 +48,7 @@ static int make_repairdb_backup( pkg_db *db ) {
 }
 
 static int perform_repair( pkg_db *db, char content_checking ) {
-  int status;
+  int status, result;
   claims_list_map_t *m;
   rbtree *t;
 
@@ -99,6 +99,18 @@ static int perform_repair( pkg_db *db, char content_checking ) {
      * checking is enabled as a compiled-in default), the MD5s.  The
      * latter case in particular is potentially quite expensive, but
      * is the most accurate method.
+     *
+     * Pass three: reconstruct database
+     *
+     * Modify the database in accordance with the claims awarded in
+     * pass two.  We enumerate the database and, for each record,
+     * check it against the list of claims awarded.  If it does not
+     * appear, add it to a list of records to be deleted.  If it does
+     * but is for a different package, add it to a list of records to
+     * be modified and remove it from the list of claims awarded.  At
+     * the end, the remaining records in the list of claims awarded
+     * are the ones to be added to the database.  Perform these
+     * modifications and we're finished.
      */
 
     /* Perform pass one, and get a claims_list_map_t out */
@@ -116,6 +128,16 @@ static int perform_repair( pkg_db *db, char content_checking ) {
       if ( t ) {
 	printf( "Pass two complete; upheld claims on %lu locations\n",
 		t->count );
+
+	result = repairdb_pass_three( db, t );
+
+	if ( result == REPAIRDB_SUCCESS ) {
+	  printf( "Pass three complete\n" );
+	}
+	else {
+	  status = result;
+	  fprintf( stderr, "Unable to complete pass three of repairdb\n" );
+	}
 
 	rbtree_free( t );
       }
