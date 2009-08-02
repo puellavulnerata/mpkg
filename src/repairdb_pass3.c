@@ -33,79 +33,86 @@ int repairdb_pass_three( pkg_db *db, rbtree *t ) {
 	pkg = NULL;
 	result = enumerate_pkg_db( db, n, &location, &pkg, &n );
 	if ( result == 0 ) {
-	  if ( location ) {
-	    /*
-	     * Query the rbtree from pass two for this location.
-	     */
-	    tpkg_v = NULL;
-	    result = rbtree_query( t, location, &tpkg_v );
-	    tpkg = (char *)tpkg_v;
-	    if ( result == RBTREE_SUCCESS ) {
+	  if ( n ) {
+	    if ( location ) {
 	      /*
-	       * Found it; check if it needs to be modified by comparing
-	       * the values.
+	       * Query the rbtree from pass two for this location.
 	       */
-	      if ( pkg && tpkg ) {
-		/* Compare the values */
-		if ( strcmp( pkg, tpkg ) != 0 ) {
-		  /* They don't match, so we need to modify this DB record */
-		  result = rbtree_insert( modifications, location, tpkg );
-		  if ( result != RBTREE_SUCCESS ) {
-		    fprintf( stderr, "Error while adding %s (for %s from %s)",
-			     location, tpkg, pkg );
-		    fprintf( stderr, "to the modification list in pass" );
-		    fprintf( stderr, "three\n" );
-		    status = REPAIRDB_ERROR;
+	      tpkg_v = NULL;
+	      result = rbtree_query( t, location, &tpkg_v );
+	      tpkg = (char *)tpkg_v;
+	      if ( result == RBTREE_SUCCESS ) {
+		/*
+		 * Found it; check if it needs to be modified by comparing
+		 * the values.
+		 */
+		if ( pkg && tpkg ) {
+		  /* Compare the values */
+		  if ( strcmp( pkg, tpkg ) != 0 ) {
+		    /*
+		     * They don't match, so we need to modify this DB
+		     * record
+		     */
+		    result = rbtree_insert( modifications, location, tpkg );
+		    if ( result != RBTREE_SUCCESS ) {
+		      fprintf( stderr,
+			       "Error while adding %s (for %s from %s)",
+			       location, tpkg, pkg );
+		      fprintf( stderr, "to the modification list in pass" );
+		      fprintf( stderr, "three\n" );
+		      status = REPAIRDB_ERROR;
+		    }
+		  }
+		  /* else no modification needed */
+
+		  /*
+		   * Either way, this one does not need to be added, so
+		   * we remove it from t.
+		   */
+		  if ( status == REPAIRDB_SUCCESS ) {
+		    result = rbtree_delete( t, location, NULL );
+		    if ( result != RBTREE_SUCCESS ) {
+		      fprintf( stderr, "Error removing %s from addition list",
+			       location );
+		      fprintf( stderr, "in pass three\n" );
+		      status = REPAIRDB_ERROR;
+		    }
 		  }
 		}
-		/* else no modification needed */
-
-		/*
-		 * Either way, this one does not need to be added, so
-		 * we remove it from t.
-		 */
-		if ( status == REPAIRDB_SUCCESS ) {
-		  result = rbtree_delete( t, location, NULL );
-		  if ( result != RBTREE_SUCCESS ) {
-		    fprintf( stderr, "Error removing %s from addition list",
-			     location );
-		    fprintf( stderr, "in pass three\n" );
-		    status = REPAIRDB_ERROR;
-		  }
+		else {
+		  fprintf( stderr, "Saw NULL value where one shouldn't have" );
+		  fprintf( stderr, " been during pass three\n" );
+		  fprintf( stderr, "location = %s, pkg = %s, tpkg = %s\n",
+			   location, ( pkg ? pkg : "null" ),
+			   (tpkg ? tpkg : "null" ) );
+		  status = REPAIRDB_ERROR;
+		}
+	      }
+	      else if ( result == RBTREE_NOT_FOUND ) {
+		/* Not found, add this one to the delete list */
+		result = rbtree_insert( deletions, location, NULL );
+		if ( result != RBTREE_SUCCESS ) {
+		  fprintf( stderr, "Error while adding %s to deletion list",
+			   location );
+		  fprintf( stderr, "in pass three\n" );
+		  status = REPAIRDB_ERROR;
 		}
 	      }
 	      else {
-		fprintf( stderr, "Saw NULL value where one shouldn't have" );
-		fprintf( stderr, " been during pass three\n" );
-		fprintf( stderr, "location = %s, pkg = %s, tpkg = %s\n",
-			 location, ( pkg ? pkg : "null" ),
-			 (tpkg ? tpkg : "null" ) );
-		status = REPAIRDB_ERROR;
-	      }
-	    }
-	    else if ( result == RBTREE_NOT_FOUND ) {
-	      /* Not found, add this one to the delete list */
-	      result = rbtree_insert( deletions, location, NULL );
-	      if ( result != RBTREE_SUCCESS ) {
-		fprintf( stderr, "Error while adding %s to deletion list",
-			 location );
-		fprintf( stderr, "in pass three\n" );
+		/* error querying rbtree from pass two */
+		fprintf( stderr, "Error querying rbtree from pass two for " );
+		fprintf( stderr, "location %s in pass three\n", location );
 		status = REPAIRDB_ERROR;
 	      }
 	    }
 	    else {
-	      /* error querying rbtree from pass two */
-	      fprintf( stderr, "Error querying rbtree from pass two for " );
-	      fprintf( stderr, "location %s in pass three\n", location );
-	      status = REPAIRDB_ERROR;
+	      fprintf( stderr,
+		       "Error: saw null location while enumerating database" );
+	      fprintf( stderr, " for pass three\n" );
+	      /* status = REPAIRDB_ERROR; */
 	    }
 	  }
-	  else {
-	    fprintf( stderr,
-		     "Error: saw null location while enumerating database" );
-	    fprintf( stderr, " for pass three\n" );
-	    /* status = REPAIRDB_ERROR; */
-	  }
+	  /* else end of db */
 	}
 	else {
 	  fprintf( stderr,
