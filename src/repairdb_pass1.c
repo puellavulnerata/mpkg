@@ -213,85 +213,97 @@ static int pass_one_handle_descr_entry( claims_list_map_t *m, char *p,
   int status;
   claims_list_t *cl;
   claims_list_node_t *claim;
+  /* Canonicalized path */
+  char *path;
 
   status = REPAIRDB_SUCCESS;
   if ( m && p && descr && e ) {
     if ( e->type == ENTRY_DIRECTORY ||
 	 e->type == ENTRY_FILE ||
 	 e->type == ENTRY_SYMLINK ) {
-      claim = NULL;
-      cl = NULL;
+      path = canonicalize_and_copy( e->filename );
+      if ( path ) {
+	claim = NULL;
+	cl = NULL;
 
-      claim = malloc( sizeof( *claim ) );
-      if ( claim ) {
-	claim->next = NULL;
-	claim->prev = NULL;
-	claim->c.pkg_descr_mtime = descr_mtime;
-	claim->c.pkgtime = descr->hdr.pkg_time;
-	claim->c.pkg_name = copy_string( descr->hdr.pkg_name );
-	if ( claim->c.pkg_name ) {
-	  if ( e->type == ENTRY_FILE ) {
-	    claim->c.claim_type = CLAIM_FILE;
-	    memcpy( claim->c.u.f.hash, e->u.f.hash,
-		    sizeof( claim->c.u.f.hash ) );
-	  }
-	  else if ( e->type == ENTRY_DIRECTORY ) {
-	    claim->c.claim_type = CLAIM_DIRECTORY;
+	claim = malloc( sizeof( *claim ) );
+	if ( claim ) {
+	  claim->next = NULL;
+	  claim->prev = NULL;
+	  claim->c.pkg_descr_mtime = descr_mtime;
+	  claim->c.pkgtime = descr->hdr.pkg_time;
+	  claim->c.pkg_name = copy_string( descr->hdr.pkg_name );
+	  if ( claim->c.pkg_name ) {
+	    if ( e->type == ENTRY_FILE ) {
+	      claim->c.claim_type = CLAIM_FILE;
+	      memcpy( claim->c.u.f.hash, e->u.f.hash,
+		      sizeof( claim->c.u.f.hash ) );
+	    }
+	    else if ( e->type == ENTRY_DIRECTORY ) {
+	      claim->c.claim_type = CLAIM_DIRECTORY;
+	    }
+	    else {
+	      /* e->type == ENTRY_SYMLINK */
+	      claim->c.claim_type = CLAIM_SYMLINK;
+	      claim->c.u.s.target = copy_string( e->u.s.target );
+	      if ( !(claim->c.u.s.target) ) {
+		/* Free it all if we fail to allocate */
+		free( claim->c.pkg_name );
+		free( claim );
+		claim = NULL;
+	      }
+	    }
 	  }
 	  else {
-	    /* e->type == ENTRY_SYMLINK */
-	    claim->c.claim_type = CLAIM_SYMLINK;
-	    claim->c.u.s.target = copy_string( e->u.s.target );
-	    if ( !(claim->c.u.s.target) ) {
-	      /* Free it all if we fail to allocate */
-	      free( claim->c.pkg_name );
-	      free( claim );
-	      claim = NULL;
-	    }
+	    free( claim );
+	    claim = NULL;
 	  }
+	}
+
+	if ( claim ) cl = get_claims_list_by_location( m, path );
+
+	if ( claim && cl ) {
+	  /* Set the claim location */
+	  claim->c.location = cl->location;
+	  /* Attach this claim to the list */
+	  claim->prev = NULL;
+	  claim->next = cl->head;
+	  if ( cl->head ) cl->head->prev = claim;
+	  else cl->tail = claim;
+	  cl->head = claim;
+	  /*
+	   * Increment the locations counter if this is the first claim
+	   * for this location.
+	   */
+	  if ( cl->num_claims == 0 ) ++(m->num_locations);
+	  /* Increment the claims counters */
+	  ++(cl->num_claims);
+	  ++(m->num_claims);
 	}
 	else {
-	  free( claim );
-	  claim = NULL;
+	  /*
+	   * We don't need to free cl here; it's just empty and it'll
+	   * get freed with the rest of the claims list map.
+	   */
+	  if ( claim ) {
+	    if ( claim->c.claim_type == CLAIM_SYMLINK ) {
+	      if ( claim->c.u.s.target ) {
+		free( claim->c.u.s.target );
+		claim->c.u.s.target = NULL;
+	      }
+	    }
+	    free( claim );
+	  }
+	  fprintf( stderr,
+		   "Failed to allocate memory handling entry %s in %s\n",
+		   path, p );
+	  status = REPAIRDB_FATAL_ERROR;
 	}
-      }
 
-      if ( claim ) cl = get_claims_list_by_location( m, e->filename );
-
-      if ( claim && cl ) {
-	/* Set the claim location */
-	claim->c.location = cl->location;
-	/* Attach this claim to the list */
-	claim->prev = NULL;
-	claim->next = cl->head;
-	if ( cl->head ) cl->head->prev = claim;
-	else cl->tail = claim;
-	cl->head = claim;
-	/*
-	 * Increment the locations counter if this is the first claim
-	 * for this location.
-	 */
-	if ( cl->num_claims == 0 ) ++(m->num_locations);
-	/* Increment the claims counters */
-	++(cl->num_claims);
-	++(m->num_claims);
+	free( path );
       }
       else {
-	/*
-	 * We don't need to free cl here; it's just empty and it'll
-	 * get freed with the rest of the claims list map.
-	 */
-	if ( claim ) {
-	  if ( claim->c.claim_type == CLAIM_SYMLINK ) {
-	    if ( claim->c.u.s.target ) {
-	      free( claim->c.u.s.target );
-	      claim->c.u.s.target = NULL;
-	    }
-	  }
-	  free( claim );
-	}
-	fprintf( stderr,
-		 "Failed to allocate memory handling entry %s in %s\n",
+	fprintf( stderr, "Failed to canonicalize pathname %s in %s\n",
 		 e->filename, p );
 	status = REPAIRDB_FATAL_ERROR;
       }
