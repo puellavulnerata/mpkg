@@ -753,6 +753,56 @@ static int check_path_for_descr( const char *path ) {
 
 #endif /* PKGFMT_V1 */
 
+void create_help( void ) {
+  printf( "Create new packages from a directory of files.  Usage:\n\n" );
+  printf( "mpkg [global options] create [options] <input> [<name>] " );
+  printf( "<output>\n\n" );
+  printf( "[options] may be one or more of:\n" );
+  printf( "  --disable-dirs: Don't include directories in the " );
+  printf( "package-description\n" );
+  printf( "  --enable-dirs: Include directories in the " );
+  printf( "package-description\n" );
+  printf( "\n" );
+  printf( "  --disable-files: Don't include regular files in the " );
+  printf( "package-description\n" );
+  printf( "  --enable-files: Include regular files in the " );
+  printf( "package-description\n" );
+  printf( "\n" );
+  printf( "  --disable-symlinks: Don't include symlinks in the " );
+  printf( "package-description\n" );
+  printf( "  --enable-symlinks: Include symlinks in the " );
+  printf( "package-description\n" );
+  printf( "\n" );
+  printf( "  --set-compression <compression>: use <compression> in the " );
+  printf( "output.\n" );
+  printf( "  <compression> can be one of:\n" );
+#ifdef COMPRESSION_BZIP2
+  printf( "    bzip2\n" );
+#endif /* COMPRESSION_BZIP2 */
+#ifdef COMPRESSION_GZIP
+  printf( "    gzip\n" );
+#endif /* COMPRESSION_GZIP */
+  printf( "    none\n" );
+  printf( "\n" );
+  printf( "  --set-version <version>: use <version> in the output.\n" );
+  printf( "  <version> can be one of:\n" );
+#ifdef PKGFMT_V1
+  printf( "    v1\n" );
+#endif /* PKGFMT_V1 */
+#ifdef PKGFMT_V2
+  printf( "    v2\n" );
+#endif /* PKGFMT_V2 */
+  printf( "\n" );
+  printf( "<input> is a directory of files to make the package from; " );
+  printf( "<output> is the filename of the package to create.  If you do " );
+  printf( "not specify --set-compression or --set-version, these will be " );
+  printf( "guessed from <output>.  Emission of directories is disabled by " );
+  printf( "default; emission of files and symlinks is enabled by default." );
+  printf( "  If <name> is specified, it will be the name of the package; if" );
+  printf( " it is omitted, the name will be guessed from <input> and " );
+  printf( "<output>.\n" );
+}
+
 void create_main( int argc, char **argv ) {
   int result;
   create_opts *opts;

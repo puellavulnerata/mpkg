@@ -149,6 +149,18 @@ static void createdb_bdb( void ) {
 
 #endif /* DB_BDB */
 
+void createdb_help( void ) {
+  printf( "Create a new package database.  Usage:\n" );
+  printf( "\n" );
+  printf( "mpkg [global options] createdb <format>\n" );
+  printf( "\n" );
+  printf( "<format> is one of:\n" );
+#ifdef DB_BDB
+  printf( "  bdb\n" );
+#endif /* DB_BDB */
+  printf( "  text\n" );
+}
+
 void createdb_main( int argc, char **argv ) {
   if ( sanity_check_globals() == 0 ) {
     if ( argc == 0 ) {

@@ -6,6 +6,16 @@
 static void convertdb( dbfmt_t );
 static int copy_db_entries( pkg_db *, pkg_db * );
 
+void convertdb_help( void ) {
+  printf( "Convert the package database to a different format.  Usage:\n\n" );
+  printf( "mpkg [global options] convertdb <format>\n\n" );
+  printf( "<format> is one of:\n" );
+#ifdef DB_BDB
+  printf( "  bdb\n" );
+#endif /* DB_BDB */
+  printf( "  text\n" );
+}
+
 void convertdb_main( int argc, char **argv ) {
   int status;
   dbfmt_t dst_fmt;

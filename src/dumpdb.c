@@ -5,6 +5,20 @@
 
 static void dumpdb( void );
 
+void dumpdb_help( void ) {
+  printf( "Dump the contents of the package DB.  Usage:\n" );
+  printf( "\n" );
+  printf( "mpkg [global options] dumpdb\n" );
+  printf( "\n" );
+  printf( "The dumpdb command emits records one to a line, in the " );
+  printf( "following format:\n" );
+  printf( "\n" );
+  printf( "<location> <package name>\n" );
+  printf( "\n" );
+  printf( "Here, <location> is an absolute path, and <package name> is" );
+  printf( " the name of the package which owns that path.\n" );
+}
+
 void dumpdb_main( int argc, char **argv ) {
   if ( argc == 0 ) {
     dumpdb();

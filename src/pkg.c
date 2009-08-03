@@ -1,7 +1,7 @@
 #include <pkg.h>
 
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef USE_MTRACE
@@ -9,6 +9,7 @@
 #endif
 
 static void help_callback( int, char ** );
+static void help_help( void );
 int main( int, char **, char ** );
 static void version_callback( int, char ** );
 
@@ -17,12 +18,12 @@ struct cmd_s {
   void (*callback)( int, char ** );
   void (*help)( void );
 } cmd_table[] = {
-  { "convert", convert_main, NULL },
-  { "convertdb", convertdb_main, NULL },
-  { "create", create_main, NULL },
-  { "createdb", createdb_main, NULL },
-  { "dumpdb", dumpdb_main, NULL },
-  { "help", help_callback, NULL },
+  { "convert", convert_main, convert_help },
+  { "convertdb", convertdb_main, convertdb_help },
+  { "create", create_main, create_help },
+  { "createdb", createdb_main, createdb_help },
+  { "dumpdb", dumpdb_main, dumpdb_help },
+  { "help", help_callback, help_help },
   { "install", install_main, NULL },
   { "remove", remove_main, NULL },
   { "repairdb", repairdb_main, NULL },
@@ -78,6 +79,13 @@ static void help_callback( int argc, char **argv ) {
   else {
     printf( "Wrong number of parameters; try 'mpkg help help'\n" );
   }
+}
+
+static void help_help( void ) {
+  printf( "This is the mpkg help command.  It gives usage information" );
+  printf( " on specified mpkg commands.  Usage:\n" );
+  printf( "\n" );
+  printf( "mpkg [global options] help [<command>]\n" );
 }
 
 int main( int argc, char **argv, char **envp ) {
@@ -193,5 +201,5 @@ static void version_callback( int argc, char **argv ) {
   printf( "Written by Andrea Shepard, with Berkeley DB code by Dana Koch.\n" );
   printf( "\n" );
   printf( "Released into the public domain; " );
-  printf( "copyright is just plain ridiculous\n" );
+  printf( "copyright is just plain ridiculous.\n" );
 }

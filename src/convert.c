@@ -135,6 +135,35 @@ static int convert_files( pkg_handle *ipkg, emit_pkg_streams *opkg ) {
   return status;
 }
 
+void convert_help( void ) {
+  printf( "Convert formats of package files.  Usage:\n\n" );
+  printf( "mpkg [global options] convert [options] <input> <output>\n\n" );
+  printf( "The options are:\n" );
+  printf( "  --set-compression <compression>: force output with " );
+  printf( "compression <compression>\n" );
+  printf( "  <compression> can be one of:\n" );
+#ifdef COMPRESSION_BZIP2
+  printf( "    bzip2\n" );
+#endif /* COMPRESSION_BZIP2 */
+#ifdef COMPRESSION_GZIP
+  printf( "    gzip\n" );
+#endif /* COMPRESSION_GZIP */
+  printf( "    none\n" );
+  printf( "\n" );
+  printf( "  --set-version <version>: force output with version <version>\n" );
+  printf( "  <version> can be one of:\n" );
+#ifdef PKGFMT_V1
+  printf( "    v1\n" );
+#endif /* PKGFMT_V1 */
+#ifdef PKGFMT_V2
+  printf( "    v2\n" );
+#endif /* PKGFMT_V2 */
+  printf( "\n" );
+  printf( "If you do not specify the compression and version, the output " );
+  printf( "format will be guessed from the filename, and follow the input" );
+  printf( " where that is ambiguous.\n" );
+}
+
 void convert_main( int argc, char **argv ) {
   int status, result, i;
   convert_opts *opts;
