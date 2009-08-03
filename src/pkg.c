@@ -1,3 +1,5 @@
+#include <pkg.h>
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,8 +8,6 @@
 #include <mcheck.h>
 #endif
 
-#include <pkg.h>
-
 static void help_callback( int, char ** );
 int main( int, char **, char ** );
 static void version_callback( int, char ** );
@@ -15,26 +15,69 @@ static void version_callback( int, char ** );
 struct cmd_s {
   char *name;
   void (*callback)( int, char ** );
+  void (*help)( void );
 } cmd_table[] = {
-  { "convert", convert_main },
-  { "convertdb", convertdb_main },
-  { "create", create_main },
-  { "createdb", createdb_main },
-  { "dumpdb", dumpdb_main },
-  { "help", help_callback },
-  { "install", install_main },
-  { "remove", remove_main },
-  { "repairdb", repairdb_main },
-  { "status", status_main },
-  { "version", version_callback },
-  { NULL, NULL }
+  { "convert", convert_main, NULL },
+  { "convertdb", convertdb_main, NULL },
+  { "create", create_main, NULL },
+  { "createdb", createdb_main, NULL },
+  { "dumpdb", dumpdb_main, NULL },
+  { "help", help_callback, NULL },
+  { "install", install_main, NULL },
+  { "remove", remove_main, NULL },
+  { "repairdb", repairdb_main, NULL },
+  { "status", status_main, NULL },
+  { "version", version_callback, NULL },
+  { NULL, NULL, NULL }
 };
 
 static void help_callback( int argc, char **argv ) {
-  if ( argc == 1 ) {
-    printf( "help %s\n", argv[0] );
+  int i, found_it;
+
+  if ( argc == 0 ) {
+    printf( "Usage: mpkg [global options] command [command options]\n" );
+    printf( "\n" );
+    printf( "The global options are:\n" );
+    printf( "\t--enable-md5:\tEnable MD5 checking\n" );
+    printf( "\t--disable-md5:" );
+    printf( "\tDisable MD5 checking (use mtimes instead)\n" );
+    printf( "\n" );
+    printf( "\t--instroot <path>:\tUse <path> as root for packages\n" );
+    printf( "\t--pkgdir <path>:\tUse package database and descriptions " );
+    printf( "in <path>\n" );
+    printf( "\t--tempdir <path>:\tKeep temp files in <path>\n" );
+    printf( "\n" );
+    printf( "The commands are:\n\n" );
+
+    i = 0;
+    while ( cmd_table[i].name != NULL ) {
+      printf( "\t%s\n", cmd_table[i++].name );
+    }
+    printf( "\n" );
+    printf( "Use mpkg help <command> for command-specific help.\n" );
   }
-  else printf( "help\n" );
+  else if ( argc == 1 ) {
+    i = 0;
+    found_it = 0;
+    while ( cmd_table[i].name != NULL && !found_it ) {
+      if ( strcmp( cmd_table[i].name, argv[0] ) == 0 ) {
+	found_it = 1;
+	if ( cmd_table[i].help ) cmd_table[i].help();
+	else {
+	  printf( "No help available for command '%s'.\n", argv[0] );
+	}
+      }
+      ++i;
+    }
+
+    if ( !found_it ) {
+      fprintf( stderr, "Unknown command %s.  Try 'mpkg help'.\n",
+	       argv[0] );
+    }
+  }
+  else {
+    printf( "Wrong number of parameters; try 'mpkg help help'\n" );
+  }
 }
 
 int main( int argc, char **argv, char **envp ) {
@@ -111,8 +154,14 @@ int main( int argc, char **argv, char **envp ) {
       error = 5;
       while ( cmd_table[i].name != NULL ) {
 	if ( strcmp( cmd, cmd_table[i].name ) == 0 ) {
-	  cmd_table[i].callback( cmd_argc, cmd_argv );
-	  error = 0;
+	  if ( cmd_table[i].callback ) {
+	    cmd_table[i].callback( cmd_argc, cmd_argv );
+	    error = 0;
+	  }
+	  else {
+	    fprintf( stderr, "Command %s not implemented\n",
+		     cmd_table[i].name );
+	  }
 	  break;
 	}
 	++i;
