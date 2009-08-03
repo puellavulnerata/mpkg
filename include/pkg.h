@@ -1,6 +1,8 @@
 #ifndef __PKG_H__
 #define __PKG_H__
 
+#define VERSION "0.1"
+
 #include <convert.h>
 #include <convertdb.h>
 #include <create.h>

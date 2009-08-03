@@ -10,6 +10,7 @@
 
 static void help_callback( int, char ** );
 int main( int, char **, char ** );
+static void version_callback( int, char ** );
 
 struct cmd_s {
   char *name;
@@ -25,6 +26,7 @@ struct cmd_s {
   { "remove", remove_main },
   { "repairdb", repairdb_main },
   { "status", status_main },
+  { "version", version_callback },
   { NULL, NULL }
 };
 
@@ -131,4 +133,16 @@ int main( int argc, char **argv, char **envp ) {
 #endif
 
   return 0;
+}
+
+static void version_callback( int argc, char **argv ) {
+#ifdef BUILD_DATE
+  printf( "mpkg %s, built on %s\n", VERSION, BUILD_DATE );
+#else /* !defined(BUILD_DATE) */
+  printf( "mpkg %s\n", VERSION );
+#endif /* BUILD_DATE */
+  printf( "Written by Andrea Shepard, with Berkeley DB code by Dana Koch.\n" );
+  printf( "\n" );
+  printf( "Released into the public domain; " );
+  printf( "copyright is just plain ridiculous\n" );
 }

@@ -10,6 +10,8 @@ CC=/usr/bin/gcc-3.4.5 -m32 -mcpu=ultrasparc
 
 CFLAGS=-O2 -g -Werror
 
+CFLAGS+=-DBUILD_DATE=\"$(shell date --iso-8601)\"
+
 ifdef CONFIG_BZIP2
 	CFLAGS+=-DCOMPRESSION_BZIP2
 endif
