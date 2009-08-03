@@ -22,7 +22,7 @@ ifdef CONFIG_GZIP
 	OBJS+=streams_gzip.o
 endif
 
-.PHONY: all clean
+.PHONY: all clean strip
 
 all: mpkg
 
@@ -33,4 +33,7 @@ mpkg: $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
 clean:
-	rm -f mpkg $(OBJS)
+	$(RM) -f mpkg $(OBJS)
+
+strip: mpkg
+	$(STRIP) mpkg
