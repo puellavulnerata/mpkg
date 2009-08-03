@@ -250,6 +250,17 @@ static void status_file( const char *filename ) {
   }
 }
 
+void status_help( void ) {
+  printf( "Check the status of a file or installed package.  Usage:\n" );
+  printf( "\n" );
+  printf( "mpkg [global options] status [file | pkg] <name>\n" );
+  printf( "\n" );
+  printf( "If 'file' or 'pkg' are not specified, the status command checks" );
+  printf( " whether a file by that name exists.  If it does, it assumes " );
+  printf( "<name> is a filename.  Otherwise it interprets <name> as a " );
+  printf( "package name.\n" );
+}
+
 void status_main( int argc, char **argv ) {
   int result, file;
   struct stat st;

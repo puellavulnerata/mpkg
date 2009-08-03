@@ -12,6 +12,7 @@ static void help_callback( int, char ** );
 static void help_help( void );
 int main( int, char **, char ** );
 static void version_callback( int, char ** );
+static void version_help( void );
 
 struct cmd_s {
   char *name;
@@ -24,11 +25,11 @@ struct cmd_s {
   { "createdb", createdb_main, createdb_help },
   { "dumpdb", dumpdb_main, dumpdb_help },
   { "help", help_callback, help_help },
-  { "install", install_main, NULL },
-  { "remove", remove_main, NULL },
-  { "repairdb", repairdb_main, NULL },
-  { "status", status_main, NULL },
-  { "version", version_callback, NULL },
+  { "install", install_main, install_help },
+  { "remove", remove_main, remove_help },
+  { "repairdb", repairdb_main, repairdb_help },
+  { "status", status_main, status_help },
+  { "version", version_callback, version_help },
   { NULL, NULL, NULL }
 };
 
@@ -202,4 +203,10 @@ static void version_callback( int argc, char **argv ) {
   printf( "\n" );
   printf( "Released into the public domain; " );
   printf( "copyright is just plain ridiculous.\n" );
+}
+
+static void version_help( void ) {
+  printf( "Display version information.  Usage:\n" );
+  printf( "\n" );
+  printf( "mpkg [global options] version\n" );
 }

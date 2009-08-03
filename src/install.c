@@ -2354,6 +2354,14 @@ static int handle_symlink_replace( pkg_db *db, pkg_descr_entry *e ) {
   return status;
 }
 
+void install_help( void ) {
+  printf( "Install packages.  Usage:\n" );
+  printf( "\n" );
+  printf( "mpkg [global options] install <package 1> <package 2> ...\n" );
+  printf( "\n" );
+  printf( "<package 1>, etc., are filenames of packages to install.\n" );
+}
+
 void install_main( int argc, char **argv ) {
   pkg_db *db;
   int i, status;

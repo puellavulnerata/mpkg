@@ -204,6 +204,14 @@ static int remove_file( pkg_db *db, pkg_descr *descr, pkg_descr_entry *e ) {
   return status;
 }
 
+void remove_help( void ) {
+  printf( "Remove packages.  Usage:\n" );
+  printf( "\n" );
+  printf( "mpkg [global options] remove <package 1> <package 2> ...\n" );
+  printf( "\n" );
+  printf( "<package 1>, etc., are packages names of packages to remove.\n" );
+}
+
 void remove_main( int argc, char **argv ) {
   int i, status;
   pkg_db *db;

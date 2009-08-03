@@ -155,6 +155,22 @@ static int perform_repair( pkg_db *db, char content_checking ) {
   return status;
 }
 
+void repairdb_help( void ) {
+  printf( "Repair the package database by reconstructing it from the " );
+  printf( "installed package-description files.  Usage:\n" );
+  printf( "\n" );
+  printf( "mpkg [global options] repairdb [(--enable|--disable)-content-" );
+  printf( "checking]\n" );
+  printf( "\n" );
+  printf( "The --enable-content-checking option switches on content " );
+  printf( "checking, causing repairdb to examine the contents of the " );
+  printf( "filesystem to resolve claims by packages.  If MD5 checking " );
+  printf( "(global option --enable-md5) is also specified, this can be very" );
+  printf( " expensive.  Without content checking, repairdb only uses the " );
+  printf( "mtimes of installed package-description files to determine what" );
+  printf( " was most recently installed.\n" );
+}
+
 void repairdb_main( int argc, char **argv ) {
   char content_checking, error;
 
