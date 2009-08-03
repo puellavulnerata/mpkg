@@ -9,6 +9,8 @@ void free_pkg_globals( void );
 void init_pkg_globals( void );
 int sanity_check_globals( void );
 
+char * adjust_path_against_root( const char * );
+
 int get_check_md5( void );
 void set_check_md5( int );
 

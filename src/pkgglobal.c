@@ -14,6 +14,24 @@ static char *temp = NULL;
 
 static char * adjust_path( const char * );
 
+char * adjust_path_against_root( const char *path_in ) {
+  char *temp, *adjusted;
+
+  adjusted = NULL;
+  temp = adjust_path( path_in );
+  if ( temp ) {
+    /*
+     * So now temp is canonical and absolute, as is root.  If root is
+     * a prefix of temp, then the rest of temp is the adjusted path.
+     * if not, temp is not in root, so we return NULL.
+     */
+    adjusted = remove_path_prefix( temp, root );
+    free( temp );
+  }
+
+  return adjusted;
+}
+
 static char * adjust_path( const char *path_in ) {
   char *adjusted;
   char *cwd;

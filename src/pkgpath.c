@@ -1,4 +1,6 @@
 #include <stdlib.h>
+#include <string.h>
+
 #include <pkg.h>
 
 static int get_last_and_base( const char *, int *, const char **, int * );
@@ -341,4 +343,44 @@ int is_absolute( const char *path ) {
     return ( *path == '/' ) ? 1 : 0;
   }
   else return 0;
+}
+
+char * remove_path_prefix( const char *path, const char *prefix ) {
+  char *result, *temp;
+
+  /*
+   * The path and prefix must both be canonical, and must either both
+   * be absolute or both be relative.  We test for
+   * absolute/relativeness, but assume canonicalness.
+   */
+
+  result = NULL;
+  if ( path && prefix ) {
+    if ( is_absolute( path ) == is_absolute( prefix ) ) {
+      /*
+       * Since both paths are canonical, .. can only appear at the
+       * beginning, and / occurs singly.  Thus, prefix must be a
+       * prefix of path as a string to be a prefix as a path.
+       */
+      
+      temp = strstr( path, prefix );
+      if ( temp == path ) {
+	/* It is a prefix of path */
+	if ( strlen( prefix ) <= strlen( path ) ) {
+	  temp = malloc( ( strlen( path ) - strlen( prefix ) + 2 ) *
+			 sizeof( *temp ) );
+	  if ( temp ) {
+	    temp[0] = '/'; /* Force it to be absolute */
+	    strncpy( temp + 1, path + strlen( prefix ),
+		     strlen( path ) - strlen( prefix ) + 1 );
+	    result = canonicalize_and_copy( temp );
+	    free( temp );
+	  }
+	}
+      }
+    }
+    /* else NULL */
+  }
+
+  return result;
 }

@@ -7,8 +7,8 @@ OBJS=\
 	convert.o convertdb.o create.o createdb.o dumpdb.o emit.o install.o \
 	md5.o pkg.o pkgdb.o pkgdb_text_file.o pkgdescr.o pkgglobal.o \
 	pkgpath.o pkgutil.o rbtree.o remove.o repairdb.o repairdb_pass1.o \
-	repairdb_pass2.o repairdb_pass3.o streams.o streams_none.o tar.o \
-	unpack.o
+	repairdb_pass2.o repairdb_pass3.o status.o streams.o streams_none.o \
+	tar.o unpack.o
 
 ifdef CONFIG_BDB
 	OBJS+=pkgdb_bdb.o

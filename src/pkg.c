@@ -24,6 +24,7 @@ struct cmd_s {
   { "install", install_main },
   { "remove", remove_main },
   { "repairdb", repairdb_main },
+  { "status", status_main },
   { NULL, NULL }
 };
 
