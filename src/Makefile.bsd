@@ -1,4 +1,4 @@
-include ../config.mk
+.include "../config.mk.bsd"
 
 INCLUDE_FLAGS=-I../include
 LIBS=
@@ -10,21 +10,27 @@ OBJS=\
 	repairdb_pass2.o repairdb_pass3.o status.o streams.o streams_none.o \
 	tar.o unpack.o
 
-ifeq ($(CONFIG_BDB),1)
+.if $(CONFIG_BDB) == 1
 	OBJS+=pkgdb_bdb.o
-endif
+.endif
 
-ifeq ($(CONFIG_BZIP2),1)
+.if $(CONFIG_BZIP2) == 1
 	OBJS+=streams_bzip2.o
-endif
+.endif
 
-ifeq ($(CONFIG_GZIP),1)
+.if $(CONFIG_GZIP) == 1
 	OBJS+=streams_gzip.o
-endif
+.endif
 
 .PHONY: all clean install strip
 
 all: mpkg
+
+.SUFFIXES:
+.SUFFIXES: .o .c
+
+.c.o :
+	$(CC) $(CFLAGS) -c -o $@ $< $(INCLUDE_FLAGS)
 
 $(OBJS): %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $< $(INCLUDE_FLAGS)

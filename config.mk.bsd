@@ -31,48 +31,50 @@ MANDIR=$(PREFIX)/share/man
 
 CFLAGS=-O2 -g -Werror
 
-CFLAGS+=-DBUILD_DATE=\"$(shell date +%Y-%m-%d)\"
+BUILD_DATE != date +%Y-%m-%d
+CFLAGS+=-DBUILD_DATE=\"$(BUILD_DATE)\"
 
-ifeq ($(CONFIG_BZIP2),1)
+
+.if $(CONFIG_BZIP2) == 1
 	CFLAGS+=-DCOMPRESSION_BZIP2
-endif
+.endif
 
-ifeq ($(CONFIG_GZIP),1)
+.if $(CONFIG_GZIP) == 1
 	CFLAGS+=-DCOMPRESSION_GZIP
-endif
+.endif
 
-ifeq ($(CONFIG_PKGFMT_V1),1)
+.if $(CONFIG_PKGFMT_V1) == 1
 	CFLAGS+=-DPKGFMT_V1
-endif
+.endif
 
-ifeq ($(CONFIG_PKGFMT_V2),1)
+.if $(CONFIG_PKGFMT_V2) == 1
 	CFLAGS+=-DPKGFMT_V2
-endif
+.endif
 
-ifeq ($(CONFIG_BDB),1)
+.if $(CONFIG_BDB) == 1
 	CFLAGS+=-DDB_BDB
-endif
+.endif
 
-ifeq ($(CONFIG_MD5_DEFAULT),1)
+.if $(CONFIG_MD5_DEFAULT) == 1
 	CFLAGS+=-DCHECK_MD5_DEFAULT
-endif
+.endif
 
-ifeq ($(CONFIG_MTRACE),1)
+.if $(CONFIG_MTRACE) == 1
 	CFLAGS+=-DUSE_MTRACE
-endif
+.endif
 
 # Put any LDFLAGS you need here
 
 LDFLAGS=
 
-ifeq ($(CONFIG_BDB),1)
+.if $(CONFIG_BDB) == 1
 	LDFLAGS+=-ldb
-endif
+.endif
 
-ifeq ($(CONFIG_BZIP2),1)
+.if $(CONFIG_BZIP2) == 1
 	LDFLAGS+=-lbz2
-endif
+.endif
 
-ifeq ($(CONFIG_GZIP),1)
+.if $(CONFIG_GZIP) == 1
 	LDFLAGS+=-lz
-endif
+.endif

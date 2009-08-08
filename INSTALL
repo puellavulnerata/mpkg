@@ -1,0 +1,20 @@
+To build and install:
+
+1.) Determine the correct Makefile for your system; Makefile and
+config.mk are for GNU make; Makefile.bsd and config.mk.bsd should work
+with BSD make.
+
+2.) Edit config.mk or config.mk.bsd as needed.  Pay attention to the
+CONFIG_* options at the top in particular, which control compiled-in
+defaults.
+
+3.) make clean
+
+4.) make CC="gcc" CFLAGS="<options>"
+
+5.) (optionally) make strip
+
+6.) make PREFIX=<path> install
+
+The install target also respects DESTDIR.  You can prepare a source
+tarball for distribution using the dist target.

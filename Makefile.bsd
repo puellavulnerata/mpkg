@@ -1,4 +1,4 @@
-include config.mk
+.include "config.mk.bsd"
 
 DIST_DIR=dist
 DIST_NAME=mpkg-0.1
@@ -8,12 +8,12 @@ DIST_TARBALL=$(DIST_NAME).tar.gz
 .PHONY: all clean dist install strip
 
 all:
-	$(MAKE) -C man all
-	$(MAKE) -C src all
+	$(MAKE) -C man -f Makefile.bsd all
+	$(MAKE) -C src -f Makefile.bsd all
 
 clean:
-	$(MAKE) -C man clean
-	$(MAKE) -C src clean
+	$(MAKE) -C man -f Makefile.bsd clean
+	$(MAKE) -C src -f Makefile.bsd clean
 	$(RM) -f $(DIST_TARBALL)
 	$(RM) -rf $(DIST_STAGING)
 
@@ -30,8 +30,9 @@ dist:
 		$(DIST_TARBALL)
 
 strip:
-	$(MAKE) -C src strip
+	$(MAKE) -C src -f Makefile.bsd strip
 
 install:
-	$(MAKE) -C man install
-	$(MAKE) -C src install
+	$(MAKE) -C man -f Makefile.bsd install
+	$(MAKE) -C src -f Makefile.bsd install
+

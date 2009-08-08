@@ -1,0 +1,8 @@
+2009-08-08: 0.1 release
+	* V1 and V2 package formats
+	* gzip and bzip2 compression options
+	* Text and Berkeley DB database formats
+	* convert, convertdb, create, createdb, dumpdb, install, remove,
+	  repairdb and status commands
+
+2008-02-09: Start of development
