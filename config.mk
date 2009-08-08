@@ -7,8 +7,12 @@ CONFIG_MD5_DEFAULT=1
 CONFIG_MTRACE=1
 
 CC=/usr/bin/gcc-3.4.5 -m32 -mcpu=ultrasparc
+GZIP=gzip -9
+LN=ln
+MKDIR=mkdir
 RM=rm
 STRIP=strip
+TAR=tar
 
 CFLAGS=-O2 -g -Werror
 
