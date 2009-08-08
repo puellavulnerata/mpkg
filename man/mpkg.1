@@ -1,0 +1,474 @@
+.TH MPKG 1 2009-08-08 "mpkg 0.1"
+.SH NAME
+mpkg \- Minimalist package management system
+.SH SYNOPSIS
+.BI "mpkg [" global\ options "] " command " [" command\-specific\ options "]"
+.sp
+Global options:
+.B [--enable-md5 | --disable-md5]
+.BI "[\-\-instroot " path ]
+.BI "[\-\-pkgdir " path ]
+.BI "[\-\-tempdir " path ]
+.SH DESCRIPTION
+This program, 
+.BR mpkg ,
+is a small package management system designed for simplicity and
+limited dependencies.  It is implemented in C using standard library
+and POSIX calls; it has optional dependencies on zlib and libbz2, for
+compressed package formats, and on Berkeley DB, for the BDB package
+database format.  With all optional features compiled in, it produces
+a 126K stripped binary for a 32-bit SPARC.
+.PP
+An
+.B mpkg
+command line has a command, optionally preceded by some global
+options, and followed by options specific to that command.  The global
+options control overall settings that affect the behavior of all
+commands, such as locations of directories.
+.SH THEORY
+The
+.B mpkg
+program installs, removes and manipulates packages.  It has a database
+(normally in /var/mpkg) which maps paths of installed files to the
+name of the package for which that path was installed, and a set of
+package description files, each of which lists files, directories or
+symlinks installed by that package.  The fundamental operations are
+installing a package, and removing one.
+.PP
+When installing a package,
+.B mpkg
+installs all its files, directories or symlinks into the filesystem,
+setting owner, group and mode as specified in the package description,
+and setting the mtime to match the time declared in the package
+description file.  This mtime mechanism is used to determine whether a
+file has been modified since installation during removals when MD5
+checking is disabled.
+.PP
+When removing a package,
+.B mpkg
+examines its package description file, which was saved during
+installation, and for each entry checks the package database to see if
+that package still owns that path.  Then, it checks whether it has
+been modified using either an MD5 checksum or the mtime for files, and
+the target for symlinks, or checks whether it contains any items not
+being removed with the package in the case of a directory.  All paths
+which have not been modified and do not contain any items not
+belonging to the package are removed from the filesystem, then all
+entries from the package description file are removed from the
+database, and the package description file is removed.
+.PP
+The
+.B mpkg
+program also supports several other commands, to create package files, create
+a new database, convert between different package file and database formats,
+reconstruct a damaged package database, dump the contents of the database,
+and check the status of installed files and packages.  See the
+.B COMMANDS
+section for details.  See the
+.B FORMATS
+section for detailed information on the format of package files,
+package description files and the package database.
+.SH "GLOBAL OPTIONS"
+.TP
+.B "\-\-disable-md5"
+Turns off testing MD5 checksums of files against expected values for the
+packages claiming those files.  See
+.B "\-\-enable-md5"
+for details.
+.TP
+.B "\-\-enable-md5"
+Turns on testing MD5 checksums of files against expected values for
+the packages claiming those files.  This affects the install, remove,
+repairdb and status commands.  With MD5 checksums enabled, some
+operations will require linear time in the size of existing files.  If
+MD5 checksums are disabled, the file mtimes are compared to package
+header times instead.  If neither
+.B "\-\-enable-md5"
+or
+.B "\-\-disable-md5"
+are specified, the compiled\-in default is used.
+.TP
+.BI "\-\-instroot " path
+Sets the root directory for package installations to
+.IR "path" .
+All paths in packages to be installed or removed or in the package database
+are interpreted relative to this directory.  This options defaults to /
+if not specified.
+.TP
+.BI "\-\-pkgdir " path
+Sets the package directory to find package-description files and the
+database in to
+.IR "path" .
+The package-description files for installed package will be found in
+this directory, and are named according to package names as declared
+in the package-description header.  The package database is also found
+in this directory and named pkg-managed-files or
+pkg-managed-files.bdb, depending on format.  This option defaults to
+/var/mpkg if not specified.
+.TP
+.BI "\-\-tempdir " path
+Sets the directory to create temporary files in to
+.IR "path" .
+When installing packages, there must be enough space here to
+completely uncompress and unpack the package file.  This option
+defaults to /tmp if not specified.
+.SH COMMANDS
+.IP \(bu 4
+.BI "convert [" options "] <" input "> <" output ">"
+.sp
+Converts package files from one format to another.  The
+.I input
+and
+.I output
+filenames are specified, and the output format (compression and
+version) are determined by the output filename.  If they are left
+ambiguous by the filename, they are set to match the input format, and
+if that too fails they are set to compiled-in defaults.  The supported
+.I options
+are:
+.IP "" 4
+.BI "--set-compression <" compression ">"
+.IP "" 8
+Set the compression type of the output file.  The supported values are
+"none", and possibly "bzip2" and "gzip", depending on compile-time
+options.
+.IP "" 4
+.BI "--set-version <" version ">"
+.IP "" 8
+Set the version of the output file.  The supported values include "v1" and
+"v2", depending on compile-time options.
+.IP \(bu 4
+.BI "convertdb <" format ">"
+.sp
+Convert the package DB (in the current package directory, possibly affected
+by the
+.B --pkgdir
+global option) to a new
+.IR "format" .
+The supported formats are "text", and "bdb" if support for Berkeley DB
+was compiled in.
+.IP \(bu 4
+.BI "create [" options "] <" input "> [<" name ">] <" output ">"
+.sp
+This creates a new package from a directory of files.  The
+.I input
+parameter is the directory to create the package from, and
+.I output
+is the filename to which to output the package.  If specified,
+.I name
+is the name of the package; if it is omitted, the name is guessed from
+the input and output filenames.  The
+.I options
+control what entries are created in the package\-description for the
+new package, and the format of the output file.  The supported
+.I options
+are:
+.IP "" 4
+.B "--enable-dirs | --disable-dirs"
+.IP "" 8
+Enable or disable directory entries in the package-description for the new
+package.  The default is
+.BR "--disable-dirs" ,
+so that when creating packages you won't need to edit the package-description
+to remove entries for /, /usr, etc.
+.IP "" 4
+.B "--enable-files | --disable-files"
+.IP "" 8
+Enable or disable file entries in the package-description for the new
+package.  The default is
+.BR "--enable-files" .
+.IP "" 4
+.B "--enable-symlinks | --disable-symlinks"
+.IP "" 8
+Enable or disable symlink entries in the package-description for the new
+package.  The default is
+.BR "--enable-symlinks" .
+.IP "" 4
+.BI "--set-compression <" compression ">"
+.IP "" 8
+Set the compression of the output file to
+.IR "compression" ,
+which can be "none", and possibly "gzip" or "bzip2", depending on
+compile-time options.
+.IP "" 4
+.BI "--set-version <" version ">"
+.IP "" 8
+Set the version of the output file to
+.IR "version" ,
+which can be "v1" or "v2", depending on compile-time options.
+.IP \(bu 4
+.BI "createdb <" format ">"
+.sp
+This command creates a new package database in the package directory
+(which may be specified using the
+.B "--pkgdir"
+global option).  The
+.I format
+parameter specifies the database format, and may be "text" or possibly
+"bdb", depending on compile-time options.  The
+.B createdb
+command will create the needed directories if they do not exist.
+.IP \(bu 4
+.B dumpdb
+.sp
+This command dumps the contents of the package database to standard output.
+It emits one record on each line, in the following format:
+.sp
+.BI "<" location "> <" package\ name ">"
+.sp
+Here,
+.I location
+is an absolute path, and 
+.I "package name"
+is the name of the package which owns that path.  This output format
+is identical to that of the text format package database file.
+.IP \(bu 4
+.BI "help [<" command ">]"
+.sp
+This is the 
+.B mpkg
+help command.  It gives usage information on the specified
+.IR "command" ,
+or general information and a list of supported commands if
+.I command
+is omitted.
+.IP \(bu 4
+.BI "install <" package\ 1 "> <" package\ 2 "> ..."
+.sp
+This command installs packages from package files.  The
+.I package\ n
+parameters are filenames to install.  If more than one package file is
+specified, the specified files are installed in the order given on the
+command line.  If a package with the same name as a package to be
+installed is already present, it will be removed.
+.IP \(bu 4
+.BI "remove <" package\ 1 "> <" package\ 2 "> ..."
+.sp
+This command removes installed packages.  The
+.I package\ n
+parameters are the names of installed packages to remove.  If more
+than one package name is specified, the specified packages are removed
+in the order given on the command line.  The
+.B --enable-md5
+and
+.B --disable-md5
+global options control whether MD5 checksums or mtimes are used to
+check whether files claimed by the packages to be removed have been
+modified since installation.
+.IP \(bu 4
+.B "repairdb [(--enable|--disable)-content-checking]"
+.sp
+This command reconstructs the package database from the installed
+package-description files.  It reads all the installed
+package-descriptions, and constructs a table of claims to each
+filesystem location.  Then, it makes a resolution pass, choosing to
+uphold one claim for each location, or rejecting all of them.
+Finally, it modifies the database accordingly.  If the existing
+database has been damaged too badly to open, you should delete it and
+recreate it with the
+.B createdb
+command, then use
+.BR "repairdb" .
+.sp
+The
+.B --enable-content-checking
+and
+.B --disable-content-checking
+options control how the resolution pass makes its decision.  With
+content checking disabled, only the package-description files are
+used; the most recently installed package (as determined by the mtimes
+of the package-description files) to claim each location gets it.
+.sp
+With content checking enabled, the resolution pass instead examines
+the actual contents of the filesystem at each location, and checks
+whether it's consistent with the claims made in the
+package-description files.  The most recently installed package which
+matches the content of the filesystem gets each location.  Note that,
+when a package-description file claims a file at a given location, and
+a regular file actually is present at that location, the two must be
+compared to determine if they match.  This is affected by the
+.B --enable-md5
+and
+.B --disable-md5
+global options.  Running
+.B repairdb
+with
+.B --enable-content-checking
+and
+.B --enable-md5
+may be
+.B very
+slow.  Content checking is disabled by default.
+.IP \(bu 4
+.BI "status [file | pkg] <" name ">"
+.sp
+This command checks the status of installed files or packages.  If the
+.B file
+or
+.B pkg
+specifiers are not given, it checks if a file exists at that location,
+and assumes file status is meant if one does, or package status
+otherwise.  When displaying file status, this command reports on what
+package, if any claims this file and if it has been modified since
+installation.  For packages, a similar report is printed on every item
+claimed by the package-description for that package.  The modification
+tests for regular files are affected by the
+.B --enable-md5
+and
+.B --disable-md5
+global options.
+.IP \(bu 4
+.BI "version"
+.sp
+This command prints version information on standard output.
+.SH FORMATS
+The package formats are designed to be manipulated easily with standard tools.
+You can create packages without using
+.B mpkg
+by writing your own package-description files and using the tar, bzip2
+and/or gzip commands.  There are two versions of the package format.
+Both versions are based on tarballs; the tarballs created by
+.B mpkg
+have no directory or symlink entries, and any present in packages to
+be installed are ignored.  These features of packages are controlled
+solely by the package-description file.
+.sp
+In the v1 format, the package file is a single tarball, optionally
+compressed by gzip or bzip2.  The package files are contained in the
+tarball, in any order and all with relative pathnames, and the
+package-description is present as a file named package-description.
+.sp
+In the v2 format, the package file is a single tarball, not
+compressed, with two entries, package-description and
+package-content.tar (or, optionally, package-content.tar.gz or
+package-content.tar.bz2), which contains the package files as
+described for v1.  The motive for this change is to make it possible
+to edit the package-description file after creating the package
+without decompressing and recompressing the entire package.
+.sp
+The package-description files are the same for both versions, and also
+when installed in /var/mpkg (or other directory specified with the
+.B --pkgdir
+global option).  They consist of a single header line, followed by one line
+for each item claimed.  The header line has the following format:
+.sp
+.BI "<" package\ name "> <" package\ time "> /"
+.sp
+Here,
+.I "package name"
+is the name of the package, and
+.I "package time"
+is the time it was created, used to set the mtime of all installed
+files.  There are three formats for package-description entry lines,
+depending on the type of object claimed, which can be a file, a
+directory or a symlink.  The directory entry format is:
+.sp
+.BI "d <" path "> <" owner "> <" group "> <" mode ">"
+.sp
+Here,
+.I path
+is an absolute pathname,
+.I owner
+and
+.I group
+are the owner and group names to own the directory after installation,
+and
+.I mode
+is the octal mode.
+.sp
+The file entry format is:
+.sp
+.BI "f <" path "> <" checksum "> <" owner "> <" group "> <" mode ">"
+.sp
+Here,
+.I path
+is an absolute pathname,
+.I checksum
+is an MD5 checksum (written as 32 hexadecimal digits),
+.I owner
+and
+.I group
+are the owner and group names to own the file after installation, and
+.I mode
+is the octal mode.
+.sp
+The symlink entry format is:
+.sp
+.BI "s <" path "> <" target "> <" owner "> <" group ">"
+.sp
+Here,
+.I path
+is an absolute pathname,
+.I target
+is the symlink target (an arbitrary string), and
+.I owner
+and
+.I group
+are the owner and group to own the symlink after installation.
+.sp
+Finally, the database format may be either plain text (in
+pkg-managed-files in the package directory) or Berkeley DB B-Tree (in
+pkg-managed-files.bdb in the package directory) if appropriate support
+has been compiled in.
+.sp
+In the plain text format, the database file
+consists of one record on each line, in this format:
+.sp
+.BI "<" location "> <" package ">"
+.sp
+Here,
+.I location
+is a location to be claimed (as an absolute path), and
+.I package
+is a package name.  Note that the entire package database must be
+loaded into memory to open it with the text format, so for large
+systems the Berkeley DB format will have significantly better
+performance.
+.sp
+In the Berkeley DB format, the database file is a b-tree file, with
+the location as the key and the package name as the value.
+.SH PATHS
+By default,
+.B mpkg
+keeps the package-description files and database in /var/mpkg, and
+creates its temporary files in /tmp.  These can be adjusted with
+command line options; see the
+.B "GLOBAL OPTIONS"
+section.  The package database is named pkg-managed-files for the text
+database format, or pkg-managed-files.bdb for the Berkeley DB format.
+Text format databases are backed up to pkg-managed-files.bak on
+opening; and the
+.B repairdb
+command uses special backup filenames pkg-managed-files.orig and
+pkg-managed-files.bdb.orig.  The package-description files are named
+according to the names of the packages for which they were installed.
+.SH AUTHOR
+The
+.B mpkg
+program was designed and written by Andrea Shepard
+.IR "<andrea@persephoneslair.org>" ,
+with Berkeley DB code by Dana Koch.
+.SH BUGS
+No bugs are known at this time, but this is version 0.1.  If you
+discover a bug, report it to the author using the e-mail address given
+in the
+.B AUTHOR
+section.
+.SH HISTORY
+The
+.B mpkg
+project was intended to replace a set of perl scripts the author had
+been using with something more lightweight.  The v1 package file
+format is present for backwards compatibility with those scripts, and
+may be eliminated in a future version.  Initial code for
+.B mpkg
+was written on 2008-02-09, and version 0.1 was released on 2009-08-08.
+.SH DISTRIBUTION
+The latest version of
+.B mpkg
+may be obtained from
+.I "http://charon.persephoneslair.org/~andrea/mpkg/"
+.SH LICENSE
+The source code for this program and all associated documentation and
+support files are released into the public domain.  The author does
+not recognize the legitimacy of intellectual property.
