@@ -1,7 +1,7 @@
 #ifndef __PKGGLOBAL_H__
 #define __PKGGLOBAL_H__
 
-#define DEFAULT_PKG_STRING "/var/pkg"
+#define DEFAULT_PKG_STRING "/var/mpkg"
 #define DEFAULT_ROOT_STRING "/"
 #define DEFAULT_TEMP_STRING "/tmp"
 
