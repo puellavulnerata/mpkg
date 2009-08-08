@@ -2,6 +2,8 @@
 
 #include <pkg.h>
 
+#include <stdlib.h>
+
 #include <bzlib.h>
 
 #define CHUNK_SIZE 16384

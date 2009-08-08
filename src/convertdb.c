@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include <pkg.h>
 
 #define CONVERTDB_SUCCESS (0)

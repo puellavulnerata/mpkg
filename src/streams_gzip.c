@@ -1,6 +1,9 @@
 #ifdef COMPRESSION_GZIP
 
 #include <pkg.h>
+
+#include <stdlib.h>
+
 #include <zlib.h>
 
 #define CHUNK_SIZE 16384
