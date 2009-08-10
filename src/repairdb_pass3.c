@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <pkg.h>
 
 int repairdb_pass_three( pkg_db *db, rbtree *t ) {

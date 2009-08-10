@@ -1,5 +1,7 @@
 #include <pkg.h>
 
+#include <stdlib.h>
+
 #define DUMPDB_SUCCESS (0)
 #define DUMPDB_ERROR (-1)
 

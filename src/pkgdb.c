@@ -1,6 +1,7 @@
-#include <stdlib.h>
-
 #include <pkg.h>
+
+#include <stdlib.h>
+#include <string.h>
 
 int close_pkg_db( pkg_db *db ) {
   int status, result;

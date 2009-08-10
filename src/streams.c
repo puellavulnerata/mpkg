@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include <pkg.h>
 
 void close_read_stream( read_stream *r ) {
