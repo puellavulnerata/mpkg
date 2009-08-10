@@ -11,15 +11,15 @@ OBJS=\
 	tar.o unpack.o
 
 .if $(CONFIG_BDB) == 1
-	OBJS+=pkgdb_bdb.o
+  OBJS+=pkgdb_bdb.o
 .endif
 
 .if $(CONFIG_BZIP2) == 1
-	OBJS+=streams_bzip2.o
+  OBJS+=streams_bzip2.o
 .endif
 
 .if $(CONFIG_GZIP) == 1
-	OBJS+=streams_gzip.o
+  OBJS+=streams_gzip.o
 .endif
 
 .PHONY: all clean install strip
@@ -30,9 +30,6 @@ all: mpkg
 .SUFFIXES: .o .c
 
 .c.o :
-	$(CC) $(CFLAGS) -c -o $@ $< $(INCLUDE_FLAGS)
-
-$(OBJS): %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $< $(INCLUDE_FLAGS)
 
 mpkg: $(OBJS)
