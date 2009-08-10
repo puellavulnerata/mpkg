@@ -1,4 +1,4 @@
-2009-08-08: 0.1 release
+2009-08-10: 0.1 release
 	* V1 and V2 package formats
 	* gzip and bzip2 compression options
 	* Text and Berkeley DB database formats
