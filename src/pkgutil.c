@@ -160,25 +160,46 @@ void dbg_printf( char const *file, int line, char const *fmt, ... ) {
 #define INITIAL_DIR_ALLOC 16
 
 char * get_current_dir( void ) {
-  int alloced, len;
+  int alloced, len, error, done;
   char *cwd, *temp;
 
+  error = 0;
+  done = 0;
   alloced = INITIAL_DIR_ALLOC;
-  cwd = NULL;
-  while ( !cwd ) {
-    cwd = malloc( sizeof( *cwd ) * alloced );
-    if ( !(getcwd( cwd, alloced ) ) ) {
-      free( cwd );
-      cwd = NULL;
-      alloced *= 2;
+  cwd = malloc( sizeof( *cwd ) * alloced );
+  if ( cwd ) {
+    while ( !error && !done ) {
+      if ( getcwd( cwd, alloced ) ) done = 1;
+      else {
+	if ( errno == ERANGE ) {
+	  /* We need a bigger buffer */
+	  alloced *= 2;
+	  temp = realloc( cwd, sizeof( *cwd ) * alloced );
+	  if ( temp ) cwd = temp;
+	  else error = 1;
+	}
+	else error = 1;
+      }
+    }
+
+    if ( error ) {
+      /* Clean up if we have an error */
+      if ( cwd ) {
+	free( cwd );
+	cwd = NULL;
+      }
     }
   }
-  len = strlen( cwd );
-  temp = realloc( cwd, sizeof( *cwd ) * ( len + 1 ) );
-  if ( temp ) cwd = temp;
-  else {
-    free( cwd );
-    cwd = NULL;
+
+  if ( cwd ) {
+    /* If we have a result, shrink the buffer to fit */
+    len = strlen( cwd );
+    temp = realloc( cwd, sizeof( *cwd ) * ( len + 1 ) );
+    if ( temp ) cwd = temp;
+    else {
+      free( cwd );
+      cwd = NULL;
+    }
   }
 
   return cwd;

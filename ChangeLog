@@ -1,6 +1,7 @@
 2009-08-22:
 	* Fix fencepost error in create.c
 	* Fix uninitialized value in create.c
+	* Handle getcwd() errno values in pkgutil.c
 
 2009-08-10: 0.1 release
 	* V1 and V2 package formats
