@@ -1094,6 +1094,7 @@ static int emit_descr( create_opts * opts, pkg_descr *descr,
 	  close( fd );
 	  result = write_pkg_descr_to_file( descr, tmpl );
 	  if ( result == 0 ) {
+	    ti.type = TAR_FILE;
 	    strncpy( ti.filename, descr_name,
 		   TAR_FILENAME_LEN + TAR_PREFIX_LEN + 1 );
 	    strncpy( ti.target, "", TAR_TARGET_LEN + 1 );
@@ -1345,7 +1346,7 @@ static char * guess_pkg_name_from_output_file( const char *outfile ) {
 	result = malloc( sizeof( *result ) * ( n + 1 ) );
 	if ( result ) {
 	  memcpy( result, lcmp, sizeof( *result ) * n );
-	  result[n + 1] = '\0';
+	  result[n] = '\0';
 	}
 	/* else fail due to malloc() failure */
       }
