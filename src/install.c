@@ -383,7 +383,7 @@ static int create_dirs_as_needed( pkg_handle *pkg, const char *path,
 
 		    dd.mtime = pkg->descr->hdr.pkg_time;
 
-		    result = mkdir( currcomp, 0700 );
+		    result = mkdir( currcomp, 0755 );
 		    if ( result == 0 ) {
 		      result = chdir( currcomp );
 		      if ( result == 0 ) {
