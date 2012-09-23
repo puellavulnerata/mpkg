@@ -1096,9 +1096,9 @@ static int do_install_one_symlink( pkg_db *db, pkg_handle *p,
 	      }
 
 	      /* Adjust owner/group/mtime */
-	      result = chown( full_path, descr->owner, descr->group );
+	      result = lchown( full_path, descr->owner, descr->group );
 	      if ( result != 0 ) {
-		fprintf( stderr, "Warning: couldn't chown %s: %s\n",
+		fprintf( stderr, "Warning: couldn't lchown %s: %s\n",
 			 full_path, strerror( errno ) );
 	      }
 
