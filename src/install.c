@@ -383,7 +383,7 @@ static int create_dirs_as_needed( pkg_handle *pkg, const char *path,
 
 		    dd.mtime = pkg->descr->hdr.pkg_time;
 
-		    result = mkdir( currcomp, 0700 );
+		    result = mkdir( currcomp, 0755 );
 		    if ( result == 0 ) {
 		      result = chdir( currcomp );
 		      if ( result == 0 ) {
@@ -972,7 +972,6 @@ static int do_install_one_symlink( pkg_db *db, pkg_handle *p,
   int status, result, should_clear;
   char *full_path, *temp_path, *target;
   struct stat st;
-  struct utimbuf tb;
 
   status = INSTALL_SUCCESS;
   if ( db && p && is && path && descr ) {
@@ -1096,17 +1095,9 @@ static int do_install_one_symlink( pkg_db *db, pkg_handle *p,
 	      }
 
 	      /* Adjust owner/group/mtime */
-	      result = chown( full_path, descr->owner, descr->group );
+	      result = lchown( full_path, descr->owner, descr->group );
 	      if ( result != 0 ) {
-		fprintf( stderr, "Warning: couldn't chown %s: %s\n",
-			 full_path, strerror( errno ) );
-	      }
-
-	      tb.actime = descr->mtime;
-	      tb.modtime = descr->mtime;
-	      result = utime( full_path, &tb );
-	      if ( result != 0 ) {
-		fprintf( stderr, "Warning: couldn't utime %s: %s\n",
+		fprintf( stderr, "Warning: couldn't lchown %s: %s\n",
 			 full_path, strerror( errno ) );
 	      }
 

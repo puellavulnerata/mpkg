@@ -45,6 +45,12 @@ pkg_db * create_pkg_db_bdb( char *filename ) {
   }
   ret->private = (void *)bdb;
 
+  /* DB->set_flags() must come before DB->open() */
+  result = bdb->set_flags( bdb, DB_RECNUM );
+  if ( result != 0 ) {
+    fprintf( stderr, "DB->set_flags() failed, returned %d\n", result );
+  }
+
   if( ( result = bdb->open( bdb, NULL, filename, 
     NULL, DB_BTREE, DB_CREATE | DB_EXCL, 0644 ) ) != 0 )
   {
@@ -54,7 +60,6 @@ pkg_db * create_pkg_db_bdb( char *filename ) {
     free( ret );
     return NULL;
   }
-  bdb->set_flags( bdb, DB_RECNUM );
 
   return ret;
 }
@@ -89,6 +94,12 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
   }
   ret->private = (void *)bdb;
 
+  /* DB->set_flags() must come before DB->open() */
+  result = bdb->set_flags( bdb, DB_RECNUM );
+  if ( result != 0 ) {
+    fprintf( stderr, "DB->set_flags() failed, returned %d\n", result );
+  }
+
   if( ( result = bdb->open( bdb, NULL, filename, 
     NULL, DB_BTREE, 0, 0 ) ) != 0)
   {
@@ -98,7 +109,6 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
     free( ret );
     return NULL;
   }
-  bdb->set_flags( bdb, DB_RECNUM );
 
   return ret;
 }
