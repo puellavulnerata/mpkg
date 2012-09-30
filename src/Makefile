@@ -37,7 +37,7 @@ clean:
 
 install: mpkg
 	$(INSTALL) -m 0755 -d $(DESTDIR)$(BINDIR)
-	$(INSTALL) -m 0755 mpkg $(DESTDIR)$(BINDIR)
+	$(INSTALL) -m 0755 -o root -g root mpkg $(DESTDIR)$(BINDIR)
 
 strip: mpkg
 	$(STRIP) mpkg
