@@ -46,7 +46,7 @@ MANDIR=$(PREFIX)/share/man
 
 CFLAGS=-O2 -g -Werror
 
-CFLAGS+=-DBUILD_DATE=\"$(shell date +%Y-%m-%d)\"
+CFLAGS+=-DBUILD_DATE=\"$(shell LC_ALL=C LC_TIME=C date +%Y-%m-%d)\"
 
 ifeq ($(CONFIG_BZIP2),1)
 	CFLAGS+=-DCOMPRESSION_BZIP2
