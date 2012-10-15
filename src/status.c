@@ -169,7 +169,7 @@ static void status_file( const char *filename ) {
   if ( !error && have_stat ) {
     adjusted = adjust_path_against_root( filename );
     if ( adjusted ) {
-      db = open_pkg_db();
+      db = open_pkg_db_with_mode( DBMODE_RO );
       if ( db ) {
 	/* Check the package DB for this path */
 	pkg = query_pkg_db( db, adjusted );
@@ -332,7 +332,7 @@ static void status_pkg( const char *pkgname ) {
   if ( !error ) {
     if ( descr ) {
       /* We got it; now try to open the database */
-      db = open_pkg_db();
+      db = open_pkg_db_with_mode( DBMODE_RO );
       if ( db ) {
 	for ( i = 0; i < descr->num_entries; ++i ) {
 	  e = &(descr->entries[i]);
