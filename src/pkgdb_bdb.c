@@ -30,6 +30,7 @@ pkg_db * create_pkg_db_bdb( char *filename ) {
   ret->entry_count = entry_count_bdb;
   ret->format = DBFMT_BDB;
   ret->filename = copy_string( filename );
+  ret->mode = DBMODE_RW;
   if ( !(ret->filename) ) {
     free( ret );
     return NULL;
@@ -64,7 +65,7 @@ pkg_db * create_pkg_db_bdb( char *filename ) {
   return ret;
 }
 
-pkg_db * open_pkg_db_bdb( char *filename ) {
+pkg_db * open_pkg_db_bdb( char *filename, dbmode_t mode ) {
   pkg_db *ret = malloc( sizeof ( pkg_db ) );
   DB *bdb;
   int result;
@@ -79,6 +80,7 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
   ret->entry_count = entry_count_bdb;
   ret->format = DBFMT_BDB;
   ret->filename = copy_string( filename );
+  ret->mode = mode;
   if ( !(ret->filename) ) {
     free( ret );
     return NULL;
@@ -100,8 +102,11 @@ pkg_db * open_pkg_db_bdb( char *filename ) {
     fprintf( stderr, "DB->set_flags() failed, returned %d\n", result );
   }
 
-  if( ( result = bdb->open( bdb, NULL, filename, 
-    NULL, DB_BTREE, 0, 0 ) ) != 0)
+  if( ( result =
+          bdb->open( bdb, NULL, filename, 
+                     NULL, DB_BTREE,
+                     (mode == DBMODE_RW) ? 0 : DB_RDONLY,
+                     0 ) ) != 0)
   {
     /* fprintf( stderr, "bdb database open failed\n" ); */
     bdb->close( bdb, 0 );

@@ -25,8 +25,11 @@ int delete_from_pkg_db( pkg_db *db, char *key ) {
 
   status = 0;
   if ( db && key ) {
-    result = db->delete( db->private, key );
-    if ( result != 0 ) status = result;
+    if ( db->mode == DBMODE_RW ) {
+      result = db->delete( db->private, key );
+      if ( result != 0 ) status = result;
+    }
+    else status = -2;
   }
   else status = -1;
   return status;
@@ -51,14 +54,21 @@ int insert_into_pkg_db( pkg_db *db, char *key, char *value ) {
 
   status = 0;
   if ( db && key && value ) {
-    result = db->insert( db->private, key, value );
-    if ( result != 0 ) status = result;
+    if ( db->mode == DBMODE_RW ) {
+      result = db->insert( db->private, key, value );
+      if ( result != 0 ) status = result;
+    }
+    else status = -2;
   }
   else status = -1;
   return status;
 }
 
 pkg_db * open_pkg_db( void ) {
+  return open_pkg_db_with_mode( DBMODE_RW );
+}
+
+pkg_db * open_pkg_db_with_mode( dbmode_t mode ) {
   pkg_db *db;
   const char *pkg_dir;
   char *temp;
@@ -73,7 +83,7 @@ pkg_db * open_pkg_db( void ) {
     temp = malloc( sizeof( *temp ) * temp_len );
     if ( temp ) {
       snprintf( temp, temp_len, "%s/%s", pkg_dir, PKGDB_BDB_FILE_NAME );
-      db = open_pkg_db_bdb( temp );
+      db = open_pkg_db_bdb( temp, mode );
       free( temp );
     }
   }
@@ -84,7 +94,7 @@ pkg_db * open_pkg_db( void ) {
     temp = malloc( sizeof( *temp ) * temp_len );
     if ( temp ) {
       snprintf( temp, temp_len, "%s/%s", pkg_dir, PKGDB_TEXT_FILE_NAME );
-      db = open_pkg_db_text_file( temp );
+      db = open_pkg_db_text_file( temp, mode );
       free( temp );
     }
   }

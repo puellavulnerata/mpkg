@@ -114,6 +114,7 @@ pkg_db * create_pkg_db_text_file( char *filename ) {
       temp->enumerate = enumerate_text_file;
       temp->format = DBFMT_TEXT;
       temp->filename = copy_string( filename );
+      temp->mode = DBMODE_RW;
 
       if ( temp->filename ) {
 	tfd = malloc( sizeof( *tfd ) );
@@ -309,7 +310,7 @@ static int make_backup( text_file_data *tfd ) {
   return status;
 }
 
-pkg_db * open_pkg_db_text_file( char *filename ) {
+pkg_db * open_pkg_db_text_file( char *filename, dbmode_t mode ) {
   pkg_db *temp;
 
   if ( filename ) {
@@ -323,6 +324,7 @@ pkg_db * open_pkg_db_text_file( char *filename ) {
       temp->enumerate = enumerate_text_file;
       temp->format = DBFMT_TEXT;
       temp->filename = copy_string( filename );
+      temp->mode = mode;
 
       if ( temp->filename ) {
 	temp->private = read_text_file( filename );

@@ -14,6 +14,11 @@ typedef enum {
   DBFMT_UNKNOWN
 } dbfmt_t;
 
+typedef enum {
+  DBMODE_RO,
+  DBMODE_RW
+} dbmode_t;
+
 typedef struct {
   void *private;
   char * (*query)( void *, char * );
@@ -23,6 +28,7 @@ typedef struct {
   int (*enumerate)( void *, void *, char **, char **, void ** );
   int (*close)( void * );
   dbfmt_t format;
+  dbmode_t mode;
   char *filename;
 } pkg_db;
 
@@ -32,6 +38,7 @@ int enumerate_pkg_db( pkg_db *, void *, char **, char **, void ** );
 unsigned long get_entry_count_for_pkg_db( pkg_db * );
 int insert_into_pkg_db( pkg_db *, char *, char * );
 pkg_db * open_pkg_db( void );
+pkg_db * open_pkg_db_with_mode( dbmode_t );
 char * query_pkg_db( pkg_db *, char * );
 
 /*
@@ -39,12 +46,12 @@ char * query_pkg_db( pkg_db *, char * );
  */ 
 
 pkg_db * create_pkg_db_text_file( char * );
-pkg_db * open_pkg_db_text_file( char * );
+pkg_db * open_pkg_db_text_file( char *, dbmode_t );
 
 #ifdef DB_BDB
 
 pkg_db * create_pkg_db_bdb( char * );
-pkg_db * open_pkg_db_bdb( char * );
+pkg_db * open_pkg_db_bdb( char *, dbmode_t );
 
 #endif /* DB_BDB */
 
