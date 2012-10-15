@@ -37,7 +37,7 @@ static void dumpdb( void ) {
   int result, status;
 
   status = DUMPDB_SUCCESS;
-  db = open_pkg_db();
+  db = open_pkg_db_with_mode( DBMODE_RO );
   if ( db ) {
     n = NULL;
     key = value = NULL;
